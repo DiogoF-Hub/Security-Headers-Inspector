@@ -87,8 +87,15 @@ const SECURITY_HEADERS = {
     about: "X-Frame-Options tells the browser whether your site is allowed to be embedded in iframes on other sites. This is the primary defense against clickjacking attacks, where an attacker overlays your site with invisible frames to trick users into clicking on hidden elements.",
     good: "Preventing framing stops attackers from embedding your site in a malicious page. Users cannot be tricked into unknowingly clicking buttons or links on your site through transparent overlay attacks.",
     recommendation: "Set to <code>DENY</code> (no framing at all) or <code>SAMEORIGIN</code> (only your own site can frame it). Note: the CSP <code>frame-ancestors</code> directive is the modern replacement and takes precedence if set.",
-    evaluate: (val) => {
-      if (!val) return { status: "bad", msg: "Missing — your site can be embedded in iframes by any page, making it vulnerable to clickjacking." };
+    evaluate: (val, allHeaders) => {
+      if (!val) {
+        // Check if CSP frame-ancestors covers this
+        const csp = (allHeaders && allHeaders["content-security-policy"]) || "";
+        if (/frame-ancestors\s/.test(csp)) {
+          return { status: "good", msg: "Not set, but CSP frame-ancestors is configured — this is the modern replacement and takes precedence." };
+        }
+        return { status: "bad", msg: "Missing — your site can be embedded in iframes by any page, making it vulnerable to clickjacking." };
+      }
       const v = val.trim().toUpperCase();
       if (v === "DENY" || v === "SAMEORIGIN")
         return { status: "good", msg: `Set to "${v}" — clickjacking protection is active.` };
@@ -142,12 +149,72 @@ const ADDITIONAL_HEADERS = {
   }
 };
 
+// Information disclosure headers — these leak server/tech info to attackers.
+// Not scored (matches securityheaders.com), just flagged as recommendations.
+const DISCLOSURE_HEADERS = {
+  "server": {
+    label: "Server",
+    check: (val) => {
+      if (!val) return null; // Not present, nothing to flag
+      // Flag if it contains a version number (e.g. nginx/1.18.0, Apache/2.4.41)
+      if (/\/[\d]/.test(val))
+        return { msg: `Exposes software version: "${val}". Remove the version number to make fingerprinting harder.`, detail: "Attackers use version info to look up known vulnerabilities for that exact release." };
+      return null;
+    }
+  },
+  "x-powered-by": {
+    label: "X-Powered-By",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Exposes backend technology: "${val}". This header should be removed entirely.`, detail: "Knowing the framework/language helps attackers narrow down exploits. There is no reason to send this header." };
+    }
+  },
+  "x-aspnet-version": {
+    label: "X-AspNet-Version",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Exposes ASP.NET version: "${val}". Remove this header in your web.config.`, detail: "Version-specific exploits are well-documented for ASP.NET. Hiding this adds a layer of obscurity." };
+    }
+  },
+  "x-aspnetmvc-version": {
+    label: "X-AspNetMvc-Version",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Exposes ASP.NET MVC version: "${val}". Remove via MvcHandler.DisableMvcResponseHeader.`, detail: "This reveals your exact MVC framework version, making targeted attacks easier." };
+    }
+  },
+  "x-generator": {
+    label: "X-Generator",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Exposes site generator: "${val}". Consider removing this header.`, detail: "CMS and generator info helps attackers identify known vulnerabilities for your platform." };
+    }
+  },
+  "via": {
+    label: "Via",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Exposes proxy/gateway info: "${val}". Consider removing if not needed.`, detail: "This can reveal internal infrastructure details like proxy software and topology." };
+    }
+  }
+};
+
 // Grade computation
 function computeGrade(headers) {
   const securityKeys = Object.keys(SECURITY_HEADERS);
+
+  // If X-Frame-Options is missing but CSP has frame-ancestors, count it as present
+  // (securityheaders.com does this — frame-ancestors is the modern replacement)
+  const csp = headers["content-security-policy"] || "";
+  const hasFrameAncestors = /frame-ancestors\s/.test(csp);
+
   let present = 0;
   for (const h of securityKeys) {
-    if (headers[h]) present++;
+    if (headers[h]) {
+      present++;
+    } else if (h === "x-frame-options" && hasFrameAncestors) {
+      present++;
+    }
   }
 
   const bonusHeaders = ["cross-origin-opener-policy", "cross-origin-resource-policy", "cross-origin-embedder-policy"];
@@ -161,15 +228,15 @@ function computeGrade(headers) {
 
   if (ratio === 1 && bonusCount >= 2) {
     letter = "A+"; cssClass = "grade-aplus";
-  } else if (ratio === 1) {
-    letter = "A"; cssClass = "grade-a";
   } else if (ratio >= 0.83) {
-    letter = "B"; cssClass = "grade-b";
+    letter = "A"; cssClass = "grade-a";
   } else if (ratio >= 0.66) {
-    letter = "C"; cssClass = "grade-c";
+    letter = "B"; cssClass = "grade-b";
   } else if (ratio >= 0.5) {
-    letter = "D"; cssClass = "grade-d";
+    letter = "C"; cssClass = "grade-c";
   } else if (ratio >= 0.33) {
+    letter = "D"; cssClass = "grade-d";
+  } else if (ratio >= 0.16) {
     letter = "E"; cssClass = "grade-e";
   } else {
     letter = "F"; cssClass = "grade-f";
@@ -188,6 +255,9 @@ function fetchHeadersViaBackground(url) {
   });
 }
 
+// Store current headers for copy button
+let currentHeaders = null;
+
 // Build the UI
 function render(data) {
   const noData = document.getElementById("no-data");
@@ -200,10 +270,12 @@ function render(data) {
     header.style.display = "none";
     quickStatus.style.display = "none";
     toggleBtn.style.display = "none";
+    document.getElementById("external-scans").style.display = "none";
     return;
   }
 
   const headers = data.headers;
+  currentHeaders = headers;
   const grade = computeGrade(headers);
 
   // Grade badge
@@ -221,11 +293,16 @@ function render(data) {
   document.getElementById("site-summary").textContent =
     `${grade.present}/${grade.total} security headers present`;
 
+  // Check if CSP frame-ancestors covers X-Frame-Options
+  const csp = headers["content-security-policy"] || "";
+  const hasFrameAncestors = /frame-ancestors\s/.test(csp);
+
   // Quick status pills
   quickStatus.innerHTML = "";
   for (const [key, def] of Object.entries(SECURITY_HEADERS)) {
+    const isPresent = headers[key] || (key === "x-frame-options" && hasFrameAncestors);
     const pill = document.createElement("span");
-    pill.className = `status-pill ${headers[key] ? "present" : "missing"}`;
+    pill.className = `status-pill ${isPresent ? "present" : "missing"}`;
     pill.textContent = def.label;
     quickStatus.appendChild(pill);
   }
@@ -234,15 +311,37 @@ function render(data) {
   const secList = document.getElementById("security-headers-list");
   secList.innerHTML = "";
   for (const [key, def] of Object.entries(SECURITY_HEADERS)) {
-    secList.appendChild(createHeaderItem(key, def, headers[key]));
+    secList.appendChild(createHeaderItem(key, def, headers[key], headers));
   }
 
   // Additional headers detail list
   const addList = document.getElementById("additional-headers-list");
   addList.innerHTML = "";
   for (const [key, def] of Object.entries(ADDITIONAL_HEADERS)) {
-    addList.appendChild(createHeaderItem(key, def, headers[key]));
+    addList.appendChild(createHeaderItem(key, def, headers[key], headers));
   }
+
+  // Information disclosure checks
+  const disclosureSection = document.getElementById("disclosure-section");
+  const disclosureList = document.getElementById("disclosure-list");
+  disclosureList.innerHTML = "";
+  let disclosureFound = false;
+
+  for (const [key, def] of Object.entries(DISCLOSURE_HEADERS)) {
+    const result = def.check(headers[key]);
+    if (result) {
+      disclosureFound = true;
+      const item = document.createElement("div");
+      item.className = "disclosure-item";
+      item.innerHTML = `
+        <div class="disclosure-header">${def.label}</div>
+        <div class="disclosure-msg">${result.msg}</div>
+        <div class="disclosure-detail">${result.detail}</div>
+      `;
+      disclosureList.appendChild(item);
+    }
+  }
+  disclosureSection.style.display = disclosureFound ? "" : "none";
 
   // Raw headers
   const rawContainer = document.getElementById("raw-headers");
@@ -256,8 +355,8 @@ function render(data) {
   }
 }
 
-function createHeaderItem(key, def, value) {
-  const result = def.evaluate(value);
+function createHeaderItem(key, def, value, allHeaders) {
+  const result = def.evaluate(value, allHeaders);
   const item = document.createElement("div");
   item.className = `header-item ${result.status}`;
 
@@ -265,7 +364,10 @@ function createHeaderItem(key, def, value) {
 
   item.innerHTML = `
     <div class="header-name">
-      <span>${def.label}</span>
+      <span class="header-label">
+        <span class="expand-chevron">&#9656;</span>
+        ${def.label}
+      </span>
       <span class="status-icon ${result.status}">${statusIcons[result.status]}</span>
     </div>
     <div class="header-value">${value ? escapeHtml(value) : '<em style="color:#ff4136;">Not set</em>'}</div>
@@ -317,10 +419,47 @@ document.getElementById("raw-toggle").addEventListener("click", function () {
   this.classList.toggle("expanded");
 });
 
+// Copy raw headers to clipboard
+document.getElementById("copy-raw-btn").addEventListener("click", function () {
+  if (!currentHeaders) return;
+  const btn = this;
+  const sortedKeys = Object.keys(currentHeaders).sort();
+  const text = sortedKeys.map(k => `${k}: ${currentHeaders[k]}`).join("\n");
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "Copied!";
+    btn.classList.add("copied");
+    setTimeout(() => {
+      btn.textContent = "Copy";
+      btn.classList.remove("copied");
+    }, 1500);
+  });
+});
+
+// External scan buttons
+function getHostname() {
+  const el = document.getElementById("site-url");
+  return el ? el.textContent.trim() : null;
+}
+
+document.getElementById("scan-secheaders").addEventListener("click", () => {
+  const host = getHostname();
+  if (host && host !== "Loading...") {
+    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(host)}&hide=on&followRedirects=on`, active: false });
+  }
+});
+
+document.getElementById("scan-ssllabs").addEventListener("click", () => {
+  const host = getHostname();
+  if (host && host !== "Loading...") {
+    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(host)}&hideResults=on&latest`, active: false });
+  }
+});
+
 function renderInternalPage(url) {
   document.getElementById("header").style.display = "none";
   document.getElementById("quick-status").style.display = "none";
   document.getElementById("toggle-details").style.display = "none";
+  document.getElementById("external-scans").style.display = "none";
 
   const el = document.getElementById("internal-page");
   el.classList.remove("hidden");
@@ -328,37 +467,53 @@ function renderInternalPage(url) {
   document.getElementById("internal-scheme").textContent = (url || "").split(/[?#]/)[0].substring(0, 60) + ((url || "").length > 60 ? "..." : "");
 }
 
-// Init: ask background for headers (MV2 persistent background has them in memory),
-// fall back to XHR for tabs loaded before extension was installed
-chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-  if (!tabs[0]) {
-    render(null);
-    return;
-  }
+// Scan the active tab: try cached headers first, fall back to background fetch
+function scanActiveTab(forceRefresh = false) {
+  chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+    if (!tabs[0]) {
+      render(null);
+      return;
+    }
 
-  const tab = tabs[0];
-  const url = tab.url;
+    const tab = tabs[0];
+    const url = tab.url;
 
-  if (!url || (!url.startsWith("http://") && !url.startsWith("https://"))) {
-    renderInternalPage(url);
-    return;
-  }
+    if (!url || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+      renderInternalPage(url);
+      return;
+    }
 
-  // Show scanning state
-  let hostname = url;
-  try { hostname = new URL(url).hostname; } catch {}
-  document.getElementById("site-url").textContent = hostname;
-  document.getElementById("site-summary").textContent = "Fetching headers...";
+    // Show scanning state
+    let hostname = url;
+    try { hostname = new URL(url).hostname; } catch {}
+    document.getElementById("site-url").textContent = hostname;
+    document.getElementById("site-summary").textContent = "Fetching headers...";
 
-  // Ask persistent background page for cached headers (from page navigation)
-  chrome.runtime.sendMessage({ type: "getHeaders", tabId: tab.id }, async (response) => {
-    if (response && response.headers && Object.keys(response.headers).length > 0) {
-      render(response);
-    } else {
-      // No cached data — ask background to fetch the URL.
-      // The background's fetch triggers webRequest, which captures ALL headers (including HSTS).
+    if (forceRefresh) {
+      // Skip cache — always do a fresh fetch via background
       const data = await fetchHeadersViaBackground(url);
       render(data);
+    } else {
+      // Try cached headers first
+      chrome.runtime.sendMessage({ type: "getHeaders", tabId: tab.id }, async (response) => {
+        if (response && response.headers && Object.keys(response.headers).length > 0) {
+          render(response);
+        } else {
+          const data = await fetchHeadersViaBackground(url);
+          render(data);
+        }
+      });
     }
   });
+}
+
+// Rescan button
+document.getElementById("rescan-btn").addEventListener("click", () => {
+  const btn = document.getElementById("rescan-btn");
+  btn.classList.add("spinning");
+  setTimeout(() => btn.classList.remove("spinning"), 600);
+  scanActiveTab(true);
 });
+
+// Init
+scanActiveTab();

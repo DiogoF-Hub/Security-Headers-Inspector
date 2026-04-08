@@ -15,10 +15,21 @@
         <div id="site-url">Loading...</div>
         <div id="site-summary"></div>
       </div>
+      <button id="rescan-btn" title="Re-scan headers">&#8635;</button>
     </div>
 
     <!-- Quick status row -->
     <div id="quick-status"></div>
+
+    <!-- External scan links -->
+    <div id="external-scans">
+      <button id="scan-secheaders" title="Scan on securityheaders.com">
+        <span class="scan-icon">&#9881;</span> SecurityHeaders.com
+      </button>
+      <button id="scan-ssllabs" title="Scan on SSL Labs">
+        <span class="scan-icon">&#128274;</span> SSL Labs
+      </button>
+    </div>
 
     <!-- Expand toggle -->
     <button id="toggle-details">Show Details <span class="arrow">&#9660;</span></button>
@@ -37,9 +48,18 @@
         <div id="additional-headers-list"></div>
       </div>
 
+      <!-- Information disclosure section -->
+      <div class="section" id="disclosure-section" style="display:none;">
+        <h3>Information Disclosure</h3>
+        <div id="disclosure-list"></div>
+      </div>
+
       <!-- Raw headers section -->
       <div class="section">
-        <h3 class="raw-toggle" id="raw-toggle">Raw Headers <span class="arrow">&#9660;</span></h3>
+        <div class="raw-header-row">
+          <h3 class="raw-toggle" id="raw-toggle">Raw Headers <span class="arrow">&#9660;</span></h3>
+          <button id="copy-raw-btn" title="Copy raw headers to clipboard">Copy</button>
+        </div>
         <div id="raw-headers" class="collapsed"></div>
       </div>
     </div>

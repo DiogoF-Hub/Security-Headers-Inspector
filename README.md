@@ -2,7 +2,7 @@
 
 A browser extension (Chrome/Brave) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
 
-**Current Version:** 1.1.6
+**Current Version:** 1.3.1
 
 ## What It Does
 
@@ -46,12 +46,12 @@ Click the extension icon on any tab and get an instant security report:
 | Grade | Criteria |
 |-------|----------|
 | **A+** | All 6 core headers + at least 2 bonus (COOP, CORP, COEP) |
-| **A** | All 6 core headers present |
-| **B** | 5 of 6 core headers |
-| **C** | 4 of 6 core headers |
-| **D** | 3 of 6 core headers |
-| **E** | 2 of 6 core headers |
-| **F** | 0–1 core headers |
+| **A** | 5–6 of 6 core headers |
+| **B** | 4 of 6 core headers |
+| **C** | 3 of 6 core headers |
+| **D** | 2 of 6 core headers |
+| **E** | 1 of 6 core headers |
+| **F** | 0 core headers |
 
 ## Architecture
 
@@ -119,6 +119,21 @@ Built iteratively through these versions:
 - **1.1.4** — Internal page detection for `chrome://`, `brave://`, `about:`, extensions, `file://`, etc.
 - **1.1.5** — Browser-specific labeling (Brave vs Chrome vs Edge)
 - **1.1.6** — Simplified internal page message (no browser name, just "Internal Page")
+- **1.1.7** — Auto-scan all tabs on startup/install; badge shows grade without clicking the extension
+- **1.1.8** — Fixed scanTab to read headers from fetch Response directly, handling redirects reliably
+- **1.1.9** — Fixed badge disappearing on page refresh (browser clears per-tab badges on navigation; now re-applied via `tabs.onUpdated`)
+- **1.2.0** — Expandable header items now show a chevron arrow (▸/▾) and hover highlight for clearer clickability
+- **1.2.1** — Added re-scan button (↻) in the header bar for on-demand fresh header fetch
+- **1.2.2** — Fixed HSTS not showing on first scan: prioritize webRequest data over fetch Response (browsers hide HSTS from fetch); added `cache: "no-store"` and redirect-aware URL matching
+- **1.2.3** — New icon: clean dark shield with header lines and green checkmark
+- **1.2.4** — Fixed inconsistent results on refresh: 304 Not Modified responses return minimal headers, which were overwriting the full cached set. Now preserves existing data on 304
+- **1.2.5** — Added quick-scan buttons for SecurityHeaders.com and SSL Labs — opens a new tab with the current site pre-filled
+- **1.2.6** — External scan links now open in a background tab (`active: false`) so the popup stays open
+- **1.2.7** — Fixed popup content getting clipped at the top: moved scroll from `#details` to the body with `max-height: 580px`, so the entire popup scrolls within the browser's size limit
+- **1.2.8** — Adjusted grading to match securityheaders.com: 5/6 headers is now A (was B), shifted all grades down one tier
+- **1.2.9** — Added "Copy" button next to Raw Headers toggle — copies all headers as `key: value` text to clipboard with a "Copied!" confirmation
+- **1.3.0** — CSP `frame-ancestors` now counts as X-Frame-Options equivalent (matching securityheaders.com behavior). Affects grading, status pills, and detail card verdict
+- **1.3.1** — Added "Information Disclosure" section: flags headers that leak server/tech info (Server version, X-Powered-By, X-AspNet-Version, X-Generator, Via). No grade impact, just soft recommendations
 
 ## Key Lessons Learned
 

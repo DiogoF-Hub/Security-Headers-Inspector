@@ -13,6 +13,22 @@ body {
   max-width: 600px;
   width: max-content;
   min-height: 100px;
+  max-height: 580px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+body::-webkit-scrollbar {
+  width: 6px;
+}
+
+body::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+
+body::-webkit-scrollbar-thumb {
+  background: #0f3460;
+  border-radius: 3px;
 }
 
 #app {
@@ -49,6 +65,38 @@ body {
   flex: 1;
 }
 
+#rescan-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: #8892b0;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, transform 0.3s;
+}
+
+#rescan-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #ccd6f6;
+}
+
+#rescan-btn.spinning {
+  animation: spin 0.6s ease;
+  pointer-events: none;
+  color: #0074d9;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 #site-url {
   font-size: 13px;
   font-weight: 600;
@@ -72,6 +120,42 @@ body {
   padding: 10px 16px;
   background: #16213e;
   border-bottom: 1px solid #0f3460;
+}
+
+/* External scan links */
+#external-scans {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+}
+
+#external-scans button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: #8892b0;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+#external-scans button:hover {
+  background: rgba(255,255,255,0.1);
+  color: #ccd6f6;
+  border-color: rgba(255,255,255,0.15);
+}
+
+#external-scans .scan-icon {
+  font-size: 12px;
 }
 
 .status-pill {
@@ -141,21 +225,6 @@ body {
 /* Details area */
 #details {
   padding: 0;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-#details::-webkit-scrollbar {
-  width: 6px;
-}
-
-#details::-webkit-scrollbar-track {
-  background: #1a1a2e;
-}
-
-#details::-webkit-scrollbar-thumb {
-  background: #0f3460;
-  border-radius: 3px;
 }
 
 .section {
@@ -206,12 +275,38 @@ body {
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.header-name:hover {
+  background: rgba(255,255,255,0.06);
 }
 
 .header-name span {
   font-weight: 600;
   font-size: 12px;
   color: #ccd6f6;
+}
+
+.header-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.expand-chevron {
+  font-size: 10px !important;
+  color: #6b7999 !important;
+  font-weight: 400 !important;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.header-item.expanded .expand-chevron {
+  transform: rotate(90deg);
 }
 
 .header-name .status-icon {
@@ -303,6 +398,68 @@ body {
 }
 
 /* Raw headers */
+.raw-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#copy-raw-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: #8892b0;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+#copy-raw-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #ccd6f6;
+}
+
+#copy-raw-btn.copied {
+  background: rgba(46, 204, 64, 0.15);
+  color: #2ecc40;
+  border-color: rgba(46, 204, 64, 0.3);
+}
+
+/* Information disclosure */
+.disclosure-item {
+  background: rgba(255, 170, 0, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-left: 3px solid rgba(255, 170, 0, 0.35);
+}
+
+.disclosure-item:last-child {
+  margin-bottom: 0;
+}
+
+.disclosure-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ccd6f6;
+}
+
+.disclosure-msg {
+  font-size: 11px;
+  color: #c0a060;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.disclosure-detail {
+  font-size: 11px;
+  color: #6b7999;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
 .raw-toggle {
   cursor: pointer;
   display: flex;
