@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Headers</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Compact header -->
+    <div id="header">
+      <div id="grade-badge">-</div>
+      <div id="site-info">
+        <div id="site-url">Loading...</div>
+        <div id="site-summary"></div>
+      </div>
+    </div>
+
+    <!-- Quick status row -->
+    <div id="quick-status"></div>
+
+    <!-- Expand toggle -->
+    <button id="toggle-details">Show Details <span class="arrow">&#9660;</span></button>
+
+    <!-- Expandable details -->
+    <div id="details" class="collapsed">
+      <!-- Security headers section -->
+      <div class="section">
+        <h3>Security Headers</h3>
+        <div id="security-headers-list"></div>
+      </div>
+
+      <!-- Additional headers section -->
+      <div class="section">
+        <h3>Additional Headers</h3>
+        <div id="additional-headers-list"></div>
+      </div>
+
+      <!-- Raw headers section -->
+      <div class="section">
+        <h3 class="raw-toggle" id="raw-toggle">Raw Headers <span class="arrow">&#9660;</span></h3>
+        <div id="raw-headers" class="collapsed"></div>
+      </div>
+    </div>
+
+    <!-- No data state -->
+    <div id="no-data" class="hidden">
+      <p>No headers available for this page.</p>
+      <p class="hint">Try navigating to a regular website.</p>
+    </div>
+
+    <!-- Internal page state -->
+    <div id="internal-page" class="hidden">
+      <div id="internal-icon">&#128274;</div>
+      <p class="internal-title">Internal Page</p>
+      <p id="internal-scheme"></p>
+      <p class="hint">Not a website — security headers don't apply here.</p>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
