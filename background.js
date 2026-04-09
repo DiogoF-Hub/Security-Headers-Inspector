@@ -8,14 +8,20 @@ const fetchedHeaders = {};
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     const headers = {};
+    const cookies = [];
     for (const header of details.responseHeaders) {
-      headers[header.name.toLowerCase()] = header.value;
+      const name = header.name.toLowerCase();
+      if (name === "set-cookie") {
+        cookies.push(header.value);
+      }
+      headers[name] = header.value;
     }
 
     const data = {
       url: details.url,
       statusCode: details.statusCode,
       headers: headers,
+      cookies: cookies,
       timestamp: Date.now()
     };
 
@@ -39,7 +45,7 @@ chrome.webRequest.onHeadersReceived.addListener(
     }
   },
   { urls: ["<all_urls>"] },
-  ["responseHeaders"]
+  ["responseHeaders", "extraHeaders"]
 );
 
 // Clean up when tabs close
@@ -83,10 +89,14 @@ function scanTab(tab) {
           });
         }
 
+        // Carry over cookies from webRequest data if available
+        const cookies = (webReqData && webReqData.cookies) ? webReqData.cookies : [];
+
         const data = {
           url: finalUrl,
           statusCode: response.status,
           headers: headers,
+          cookies: cookies,
           timestamp: Date.now()
         };
 
@@ -109,7 +119,33 @@ function scanAllTabs() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(scanAllTabs);
+chrome.runtime.onInstalled.addListener(() => {
+  scanAllTabs();
+
+  // Create right-click context menu items
+  chrome.contextMenus.create({
+    id: "scan-securityheaders",
+    title: "Scan on SecurityHeaders.com",
+    contexts: ["page"]
+  });
+  chrome.contextMenus.create({
+    id: "scan-ssllabs",
+    title: "Scan on SSL Labs",
+    contexts: ["page"]
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (!tab || !tab.url) return;
+  let hostname;
+  try { hostname = new URL(tab.url).hostname; } catch { return; }
+
+  if (info.menuItemId === "scan-securityheaders") {
+    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(hostname)}&hide=on&followRedirects=on` });
+  } else if (info.menuItemId === "scan-ssllabs") {
+    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest` });
+  }
+});
 chrome.runtime.onStartup.addListener(scanAllTabs);
 
 // When a tab finishes loading, ensure the badge is set.
@@ -173,44 +209,75 @@ const BONUS_HEADERS = [
   "cross-origin-embedder-policy"
 ];
 
+// Weighted scoring matching securityheaders.com methodology
+// Source: https://snyk.io/blog/website-security-score-explained/
+// and https://scotthelme.co.uk/scoring-transparency-on-securityheaders-io/
+const HEADER_WEIGHTS = {
+  "content-security-policy":   25,
+  "strict-transport-security": 25,
+  "x-frame-options":           20,
+  "x-content-type-options":    20,
+  "referrer-policy":           15,
+  "permissions-policy":        15
+};
+const MAX_SCORE = 120; // sum of all weights
+
 function computeGrade(headers) {
-  // If X-Frame-Options is missing but CSP has frame-ancestors, count it as present
-  // (securityheaders.com does this — frame-ancestors is the modern replacement)
   const csp = headers["content-security-policy"] || "";
   const hasFrameAncestors = /frame-ancestors\s/.test(csp);
 
+  let score = 0;
   let present = 0;
+  const total = SECURITY_HEADERS.length;
+
   for (const h of SECURITY_HEADERS) {
-    if (headers[h]) {
-      present++;
-    } else if (h === "x-frame-options" && hasFrameAncestors) {
+    const isPresent = headers[h] || (h === "x-frame-options" && hasFrameAncestors);
+    if (isPresent) {
+      score += HEADER_WEIGHTS[h] || 0;
       present++;
     }
   }
 
-  let bonusCount = 0;
-  for (const h of BONUS_HEADERS) {
-    if (headers[h]) bonusCount++;
+  // CSP quality penalties (caps effective score)
+  if (csp) {
+    const directives = {};
+    csp.split(";").forEach((d) => {
+      const parts = d.trim().split(/\s+/);
+      if (parts.length > 0) directives[parts[0]] = parts.slice(1);
+    });
+    const scriptSrc = directives["script-src"] || directives["default-src"] || [];
+    const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
+    const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
+    const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
+
+    // unsafe-inline without strict-dynamic/nonce/hash: CSP is significantly weakened
+    if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
+      score = Math.min(score, MAX_SCORE * 0.82); // cap below A+
+    }
+    // unsafe-eval: penalty
+    if (scriptSrc.some(s => s === "'unsafe-eval'")) {
+      score = Math.min(score, MAX_SCORE * 0.82);
+    }
   }
 
-  const ratio = present / SECURITY_HEADERS.length;
+  const pct = (score / MAX_SCORE) * 100;
   let letter, color;
 
-  if (ratio === 1 && bonusCount >= 2) {
+  if (pct >= 95) {
     letter = "A+"; color = "#2ecc40";
-  } else if (ratio >= 0.83) {
+  } else if (pct >= 75) {
     letter = "A"; color = "#2ecc40";
-  } else if (ratio >= 0.66) {
+  } else if (pct >= 60) {
     letter = "B"; color = "#99cc00";
-  } else if (ratio >= 0.5) {
+  } else if (pct >= 50) {
     letter = "C"; color = "#ffdc00";
-  } else if (ratio >= 0.33) {
+  } else if (pct >= 29) {
     letter = "D"; color = "#ff851b";
-  } else if (ratio >= 0.16) {
+  } else if (pct >= 14) {
     letter = "E"; color = "#ff4136";
   } else {
     letter = "F"; color = "#cc0000";
   }
 
-  return { letter, color };
+  return { letter, color, present, total, score, pct };
 }

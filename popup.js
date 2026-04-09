@@ -7,24 +7,71 @@ const SECURITY_HEADERS = {
     recommendation: "Start with a strict policy like <code>default-src 'none'</code> and selectively allow only what your site needs. Avoid <code>'unsafe-inline'</code> and <code>'unsafe-eval'</code> when possible as they weaken protection considerably.",
     evaluate: (val) => {
       if (!val) return { status: "bad", msg: "Missing — your site has no Content Security Policy, leaving it vulnerable to XSS and data injection attacks." };
-      // Parse directives to check unsafe values in the right context
+
+      // Parse directives
       const directives = {};
       val.split(";").forEach((d) => {
         const parts = d.trim().split(/\s+/);
-        if (parts.length > 0) directives[parts[0]] = parts.slice(1).join(" ");
+        if (parts.length > 0) directives[parts[0]] = parts.slice(1);
       });
-      const scriptSrc = directives["script-src"] || directives["default-src"] || "";
-      // Check for 'unsafe-eval' in script-src but not 'wasm-unsafe-eval'
-      const hasUnsafeEval = /(?<![w-])unsafe-eval/.test(scriptSrc);
-      // Check for 'unsafe-inline' in script-src only (it's acceptable in style-src)
-      const hasUnsafeInline = scriptSrc.includes("unsafe-inline");
-      if (hasUnsafeInline && hasUnsafeEval)
-        return { status: "warn", msg: "Present but script-src uses 'unsafe-inline' and 'unsafe-eval', which significantly weaken XSS protection." };
-      if (hasUnsafeInline)
-        return { status: "warn", msg: "Present but script-src uses 'unsafe-inline', which weakens XSS protection by allowing inline scripts." };
-      if (hasUnsafeEval)
-        return { status: "warn", msg: "Present but script-src uses 'unsafe-eval', which allows dynamic code execution via eval()." };
-      return { status: "good", msg: "Well configured — approved content sources are whitelisted." };
+
+      const warnings = [];
+      const scriptSrc = directives["script-src"] || directives["default-src"] || [];
+      const defaultSrc = directives["default-src"] || [];
+      const objectSrc = directives["object-src"] || defaultSrc;
+      const baseSrc = directives["base-uri"] || [];
+
+      // 'strict-dynamic' negates 'unsafe-inline' in modern browsers — don't flag it
+      const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
+      const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
+      const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
+
+      // Check 'unsafe-eval' (but not 'wasm-unsafe-eval')
+      if (scriptSrc.some(s => s === "'unsafe-eval'"))
+        warnings.push("script-src uses <code>'unsafe-eval'</code> — allows dynamic code execution via eval().");
+
+      // Check 'unsafe-inline' — only flag if strict-dynamic/nonce/hash don't negate it
+      if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash)
+        warnings.push("script-src uses <code>'unsafe-inline'</code> — allows inline scripts, weakening XSS protection.");
+
+      // Wildcard * in script-src
+      if (scriptSrc.includes("*"))
+        warnings.push("script-src contains <code>*</code> wildcard — scripts can be loaded from any origin.");
+
+      // data: in script-src — allows base64-encoded script injection
+      if (scriptSrc.includes("data:"))
+        warnings.push("script-src allows <code>data:</code> URIs — attackers can inject base64-encoded scripts.");
+
+      // http: in script-src — mixed content, MITM risk
+      if (scriptSrc.some(s => s.startsWith("http://")))
+        warnings.push("script-src allows <code>http://</code> sources — scripts loaded over plain HTTP can be intercepted.");
+
+      // Missing default-src — no fallback for undeclared directives
+      if (!directives["default-src"])
+        warnings.push("No <code>default-src</code> directive — undeclared resource types have no restrictions.");
+
+      // object-src not restricted — Flash/plugin injection vector
+      if (objectSrc.length === 0 || (objectSrc.length === 1 && objectSrc[0] === "'self'")) {
+        // Fine
+      } else if (!objectSrc.includes("'none'") && !directives["object-src"]) {
+        warnings.push("<code>object-src</code> is not explicitly set — consider setting to <code>'none'</code> to block plugins.");
+      }
+
+      // base-uri not restricted — allows base tag injection
+      if (baseSrc.length === 0 && !directives["base-uri"])
+        warnings.push("<code>base-uri</code> is not set — attackers could inject a <code>&lt;base&gt;</code> tag to hijack relative URLs.");
+
+      // Wildcard in any directive
+      const wildcardDirs = Object.entries(directives)
+        .filter(([k, v]) => k !== "script-src" && v.includes("*"))
+        .map(([k]) => k);
+      if (wildcardDirs.length > 0)
+        warnings.push(`Wildcard <code>*</code> found in: ${wildcardDirs.map(d => `<code>${d}</code>`).join(", ")}.`);
+
+      if (warnings.length === 0)
+        return { status: "good", msg: "Well configured — approved content sources are whitelisted." };
+
+      return { status: "warn", msg: warnings.join("<br>") };
     }
   },
   "permissions-policy": {
@@ -196,53 +243,163 @@ const DISCLOSURE_HEADERS = {
       if (!val) return null;
       return { msg: `Exposes proxy/gateway info: "${val}". Consider removing if not needed.`, detail: "This can reveal internal infrastructure details like proxy software and topology." };
     }
+  },
+  "x-debug-token": {
+    label: "X-Debug-Token",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: "Debug token header is exposed. This should never be present in production.", detail: "Debug tokens can expose internal application state and aid in further attacks." };
+    }
+  },
+  "x-debug-token-link": {
+    label: "X-Debug-Token-Link",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Debug profiler link exposed: "${val}". Remove in production.`, detail: "This links directly to your debug profiler — a critical information leak in production." };
+    }
   }
 };
 
-// Grade computation
+// Deprecated headers — still sent by many sites but no longer useful or actively harmful.
+const DEPRECATED_HEADERS = {
+  "expect-ct": {
+    label: "Expect-CT",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: "This header is deprecated and being removed from browsers. It can be safely removed.", detail: "Certificate Transparency is now enforced by default in all major browsers. This header no longer does anything." };
+    }
+  },
+  "public-key-pins": {
+    label: "Public-Key-Pins",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: "HPKP has been removed from all browsers. Remove this header immediately.", detail: "HTTP Public Key Pinning was deprecated because misconfiguration could permanently brick your site. It has no effect now and wastes bytes." };
+    }
+  },
+  "public-key-pins-report-only": {
+    label: "Public-Key-Pins-Report-Only",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: "HPKP reporting has been removed from all browsers. This header can be safely removed.", detail: "Since HPKP itself is deprecated, the report-only variant serves no purpose." };
+    }
+  },
+  "x-runtime": {
+    label: "X-Runtime",
+    check: (val) => {
+      if (!val) return null;
+      return { msg: `Exposes server processing time: "${val}". Consider removing.`, detail: "Timing information can help attackers perform timing-based side-channel attacks to enumerate users or detect differences in code paths." };
+    }
+  }
+};
+
+// Cookie security analysis
+function analyzeCookie(cookieStr) {
+  const lower = cookieStr.toLowerCase();
+
+  // Extract cookie name (everything before the first '=')
+  const name = cookieStr.split("=")[0].trim();
+
+  const hasSecure = /;\s*secure/i.test(lower);
+  const hasHttpOnly = /;\s*httponly/i.test(lower);
+  const sameSiteMatch = lower.match(/;\s*samesite=(\w+)/);
+  const sameSite = sameSiteMatch ? sameSiteMatch[1] : null;
+  const hasPrefix = name.startsWith("__Secure-") || name.startsWith("__Host-");
+
+  const flags = [];
+  const issues = [];
+
+  if (hasSecure) flags.push("Secure");
+  else issues.push("Missing <code>Secure</code> flag — cookie can be sent over unencrypted HTTP.");
+
+  if (hasHttpOnly) flags.push("HttpOnly");
+  else issues.push("Missing <code>HttpOnly</code> flag — cookie is accessible to JavaScript (document.cookie).");
+
+  if (sameSite) {
+    flags.push(`SameSite=${sameSite.charAt(0).toUpperCase() + sameSite.slice(1)}`);
+    if (sameSite === "none" && !hasSecure)
+      issues.push("<code>SameSite=None</code> requires the <code>Secure</code> flag.");
+  } else {
+    issues.push("Missing <code>SameSite</code> attribute — browsers default to Lax, but setting it explicitly is recommended.");
+  }
+
+  if (hasPrefix) {
+    flags.push("Prefixed");
+  } else if (hasSecure) {
+    // Only suggest prefix if Secure is already set (prefix requires Secure)
+    issues.push("No <code>__Secure-</code> or <code>__Host-</code> cookie prefix. Prefixed cookies provide additional protection against cookie injection.");
+  }
+
+  return { name, flags, issues, hasSecure, hasHttpOnly, sameSite, hasPrefix };
+}
+
+// Weighted scoring matching securityheaders.com methodology
+// Source: https://snyk.io/blog/website-security-score-explained/
+const HEADER_WEIGHTS = {
+  "content-security-policy":   25,
+  "strict-transport-security": 25,
+  "x-frame-options":           20,
+  "x-content-type-options":    20,
+  "referrer-policy":           15,
+  "permissions-policy":        15
+};
+const MAX_SCORE = 120;
+
 function computeGrade(headers) {
   const securityKeys = Object.keys(SECURITY_HEADERS);
-
-  // If X-Frame-Options is missing but CSP has frame-ancestors, count it as present
-  // (securityheaders.com does this — frame-ancestors is the modern replacement)
   const csp = headers["content-security-policy"] || "";
   const hasFrameAncestors = /frame-ancestors\s/.test(csp);
 
+  let score = 0;
   let present = 0;
+
   for (const h of securityKeys) {
-    if (headers[h]) {
-      present++;
-    } else if (h === "x-frame-options" && hasFrameAncestors) {
+    const isPresent = headers[h] || (h === "x-frame-options" && hasFrameAncestors);
+    if (isPresent) {
+      score += HEADER_WEIGHTS[h] || 0;
       present++;
     }
   }
 
-  const bonusHeaders = ["cross-origin-opener-policy", "cross-origin-resource-policy", "cross-origin-embedder-policy"];
-  let bonusCount = 0;
-  for (const h of bonusHeaders) {
-    if (headers[h]) bonusCount++;
+  // CSP quality penalties
+  if (csp) {
+    const directives = {};
+    csp.split(";").forEach((d) => {
+      const parts = d.trim().split(/\s+/);
+      if (parts.length > 0) directives[parts[0]] = parts.slice(1);
+    });
+    const scriptSrc = directives["script-src"] || directives["default-src"] || [];
+    const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
+    const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
+    const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
+
+    if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
+      score = Math.min(score, MAX_SCORE * 0.82);
+    }
+    if (scriptSrc.some(s => s === "'unsafe-eval'")) {
+      score = Math.min(score, MAX_SCORE * 0.82);
+    }
   }
 
-  const ratio = present / securityKeys.length;
+  const pct = (score / MAX_SCORE) * 100;
   let letter, cssClass;
 
-  if (ratio === 1 && bonusCount >= 2) {
+  if (pct >= 95) {
     letter = "A+"; cssClass = "grade-aplus";
-  } else if (ratio >= 0.83) {
+  } else if (pct >= 75) {
     letter = "A"; cssClass = "grade-a";
-  } else if (ratio >= 0.66) {
+  } else if (pct >= 60) {
     letter = "B"; cssClass = "grade-b";
-  } else if (ratio >= 0.5) {
+  } else if (pct >= 50) {
     letter = "C"; cssClass = "grade-c";
-  } else if (ratio >= 0.33) {
+  } else if (pct >= 29) {
     letter = "D"; cssClass = "grade-d";
-  } else if (ratio >= 0.16) {
+  } else if (pct >= 14) {
     letter = "E"; cssClass = "grade-e";
   } else {
     letter = "F"; cssClass = "grade-f";
   }
 
-  return { letter, cssClass, present, total: securityKeys.length };
+  return { letter, cssClass, present, total: securityKeys.length, score, pct };
 }
 
 // Ask the background page to fetch headers — the background's fetch triggers
@@ -291,7 +448,7 @@ function render(data) {
     document.getElementById("site-url").textContent = data.url;
   }
   document.getElementById("site-summary").textContent =
-    `${grade.present}/${grade.total} security headers present`;
+    `${grade.present}/${grade.total} security headers present — Score: ${Math.round(grade.pct)}%`;
 
   // Check if CSP frame-ancestors covers X-Frame-Options
   const csp = headers["content-security-policy"] || "";
@@ -321,6 +478,61 @@ function render(data) {
     addList.appendChild(createHeaderItem(key, def, headers[key], headers));
   }
 
+  // Cookie analysis
+  const cookieSection = document.getElementById("cookie-section");
+  const cookieList = document.getElementById("cookie-list");
+  cookieList.innerHTML = "";
+  const cookies = data.cookies || [];
+
+  if (cookies.length > 0) {
+    cookieSection.style.display = "";
+    for (const cookieStr of cookies) {
+      const analysis = analyzeCookie(cookieStr);
+      const allGood = analysis.issues.length === 0;
+
+      const item = document.createElement("div");
+      item.className = `cookie-item ${allGood ? "cookie-good" : "cookie-warn"}`;
+
+      const flagsHtml = analysis.flags.map(f =>
+        `<span class="cookie-flag good">${escapeHtml(f)}</span>`
+      ).join("");
+
+      const missingHtml = !analysis.hasSecure ? '<span class="cookie-flag missing">Secure</span>' : '';
+      const missingHttp = !analysis.hasHttpOnly ? '<span class="cookie-flag missing">HttpOnly</span>' : '';
+      const missingSame = !analysis.sameSite ? '<span class="cookie-flag missing">SameSite</span>' : '';
+      const missingPrefix = !analysis.hasPrefix ? '<span class="cookie-flag missing">Prefix</span>' : '';
+
+      const statusIcon = allGood ? '<span class="status-icon good">✔</span>' : '<span class="status-icon warn">⚠</span>';
+
+      item.innerHTML = `
+        <div class="cookie-header-row">
+          <span class="cookie-name"><span class="expand-chevron">▸</span> ${escapeHtml(analysis.name)}</span>
+          ${statusIcon}
+        </div>
+        <div class="cookie-flags">${flagsHtml}${missingHtml}${missingHttp}${missingSame}${missingPrefix}</div>
+        <div class="cookie-details">
+          ${analysis.issues.length > 0 ? '<div class="desc-verdict">' + analysis.issues.join('<br>') + '</div>' : '<div class="desc-verdict" style="color:#2ecc40;">All recommended cookie security flags are present.</div>'}
+          <div class="desc-section">
+            <div class="desc-title">What are cookie flags?</div>
+            <div class="desc-text"><strong>Secure</strong> — Cookie is only sent over HTTPS, preventing interception on unencrypted connections.<br><strong>HttpOnly</strong> — Cookie cannot be accessed by JavaScript (document.cookie), mitigating XSS theft.<br><strong>SameSite</strong> — Controls whether cookie is sent with cross-site requests, preventing CSRF attacks.<br><strong>Prefix</strong> — <code>__Secure-</code> or <code>__Host-</code> prefixes add extra browser-enforced constraints on the cookie.</div>
+          </div>
+          <div class="desc-section">
+            <div class="desc-title">Recommendation</div>
+            <div class="desc-text">Set all cookies with <code>Secure; HttpOnly; SameSite=Lax</code> (or <code>Strict</code>) flags. Use <code>__Host-</code> prefix for session cookies where possible.</div>
+          </div>
+        </div>
+      `;
+
+      item.querySelector(".cookie-header-row").addEventListener("click", () => {
+        item.classList.toggle("expanded");
+      });
+
+      cookieList.appendChild(item);
+    }
+  } else {
+    cookieSection.style.display = "none";
+  }
+
   // Information disclosure checks
   const disclosureSection = document.getElementById("disclosure-section");
   const disclosureList = document.getElementById("disclosure-list");
@@ -334,25 +546,155 @@ function render(data) {
       const item = document.createElement("div");
       item.className = "disclosure-item";
       item.innerHTML = `
-        <div class="disclosure-header">${def.label}</div>
+        <div class="disclosure-header-row">
+          <span><span class="expand-chevron">▸</span> ${def.label}</span>
+          <span class="status-icon warn">⚠</span>
+        </div>
         <div class="disclosure-msg">${result.msg}</div>
-        <div class="disclosure-detail">${result.detail}</div>
+        <div class="disclosure-details">
+          <div class="desc-verdict">${result.detail}</div>
+          <div class="desc-section">
+            <div class="desc-title">Why it matters</div>
+            <div class="desc-text">Exposing server software, versions, or technology stack helps attackers fingerprint your infrastructure and find known vulnerabilities specific to those versions.</div>
+          </div>
+          <div class="desc-section">
+            <div class="desc-title">Recommendation</div>
+            <div class="desc-text">Remove or suppress this header in your web server or application configuration. Most reverse proxies (Nginx, Apache, Caddy) have options to strip these headers.</div>
+          </div>
+        </div>
       `;
+      item.querySelector(".disclosure-header-row").addEventListener("click", () => {
+        item.classList.toggle("expanded");
+      });
       disclosureList.appendChild(item);
     }
   }
   disclosureSection.style.display = disclosureFound ? "" : "none";
 
-  // Raw headers
+  // Deprecated headers checks
+  const deprecatedSection = document.getElementById("deprecated-section");
+  const deprecatedList = document.getElementById("deprecated-list");
+  deprecatedList.innerHTML = "";
+  let deprecatedFound = false;
+
+  for (const [key, def] of Object.entries(DEPRECATED_HEADERS)) {
+    const result = def.check(headers[key]);
+    if (result) {
+      deprecatedFound = true;
+      const item = document.createElement("div");
+      item.className = "deprecated-item";
+      item.innerHTML = `
+        <div class="deprecated-header-row">
+          <span><span class="expand-chevron">▸</span> ${def.label}</span>
+          <span class="status-icon info">ℹ</span>
+        </div>
+        <div class="deprecated-msg">${result.msg}</div>
+        <div class="deprecated-details">
+          <div class="desc-verdict">${result.detail}</div>
+          <div class="desc-section">
+            <div class="desc-title">Why it matters</div>
+            <div class="desc-text">Deprecated headers are no longer supported by modern browsers and may give a false sense of security. Keeping them adds unnecessary response overhead.</div>
+          </div>
+          <div class="desc-section">
+            <div class="desc-title">Recommendation</div>
+            <div class="desc-text">Remove this header from your server configuration. Use modern alternatives where available (e.g., Certificate Transparency is now enforced by browsers without needing Expect-CT).</div>
+          </div>
+        </div>
+      `;
+      item.querySelector(".deprecated-header-row").addEventListener("click", () => {
+        item.classList.toggle("expanded");
+      });
+      deprecatedList.appendChild(item);
+    }
+  }
+  deprecatedSection.style.display = deprecatedFound ? "" : "none";
+
+  // Raw headers — color-coded by type, with good tokens highlighted
+  const securitySet = new Set(Object.keys(SECURITY_HEADERS).concat(Object.keys(ADDITIONAL_HEADERS)));
+  const disclosureSet = new Set(Object.keys(DISCLOSURE_HEADERS));
+  const deprecatedSet = new Set(Object.keys(DEPRECATED_HEADERS));
+
   const rawContainer = document.getElementById("raw-headers");
   rawContainer.innerHTML = "";
   const sortedKeys = Object.keys(headers).sort();
   for (const key of sortedKeys) {
+    if (key === "set-cookie" && data.cookies && data.cookies.length > 0) continue; // shown individually below
     const row = document.createElement("div");
-    row.className = "raw-row";
-    row.innerHTML = `<span class="raw-key">${escapeHtml(key)}</span><span class="raw-val">${escapeHtml(headers[key])}</span>`;
+    let rowClass = "raw-row";
+    if (securitySet.has(key)) rowClass += " raw-security";
+    else if (disclosureSet.has(key) && DISCLOSURE_HEADERS[key].check(headers[key])) rowClass += " raw-disclosure";
+    else if (deprecatedSet.has(key) && DEPRECATED_HEADERS[key].check(headers[key])) rowClass += " raw-deprecated";
+    row.className = rowClass;
+    row.innerHTML = `<span class="raw-key">${escapeHtml(key)}</span><span class="raw-val">${highlightGoodTokens(key, headers[key])}</span>`;
     rawContainer.appendChild(row);
   }
+
+  // Also show individual Set-Cookie lines in raw headers
+  const rawCookies = data.cookies || [];
+  if (rawCookies.length > 0) {
+    for (const cookieStr of rawCookies) {
+      const row = document.createElement("div");
+      row.className = "raw-row raw-cookie";
+      row.innerHTML = `<span class="raw-key">set-cookie</span><span class="raw-val">${highlightGoodTokens("set-cookie", cookieStr)}</span>`;
+      rawContainer.appendChild(row);
+    }
+  }
+}
+
+// Highlight known-good security tokens within raw header values
+const GOOD_TOKENS = {
+  "set-cookie": [/\bSecure\b/gi, /\bHttpOnly\b/gi, /\bSameSite=(Strict|Lax|None)\b/gi, /\b__Secure-/g, /\b__Host-/g],
+  "strict-transport-security": [/\bmax-age=\d+/gi, /\bincludeSubDomains\b/gi, /\bpreload\b/gi],
+  "x-content-type-options": [/\bnosniff\b/gi],
+  "x-frame-options": [/\bDENY\b/gi, /\bSAMEORIGIN\b/gi],
+  "referrer-policy": [/\bno-referrer\b/g, /\bstrict-origin-when-cross-origin\b/g, /\bsame-origin\b/g, /\bstrict-origin\b/g, /\bno-referrer-when-downgrade\b/g, /\borigin-when-cross-origin\b/g],
+  "cross-origin-opener-policy": [/\bsame-origin\b/g, /\bsame-origin-allow-popups\b/g],
+  "cross-origin-resource-policy": [/\bsame-origin\b/g, /\bsame-site\b/g, /\bcross-origin\b/g],
+  "cross-origin-embedder-policy": [/\brequire-corp\b/g, /\bcredentialless\b/g],
+  "content-security-policy": [/\b'strict-dynamic'\b/g, /\b'nonce-[^']+'\b/g, /\b'sha(256|384|512)-[^']+'\b/g],
+  "permissions-policy": [/[a-z-]+=\(\)/g],
+};
+
+function highlightGoodTokens(headerName, value) {
+  const patterns = GOOD_TOKENS[headerName.toLowerCase()];
+  if (!patterns || !value) return escapeHtml(value || "");
+
+  // We need to escape first, then apply bold — but regex indices shift after escaping.
+  // Instead: find match positions in raw value, then build highlighted escaped output.
+  const marks = []; // {start, end} ranges to bold
+  for (const pattern of patterns) {
+    // Reset lastIndex for global regexes
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(value)) !== null) {
+      marks.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  if (marks.length === 0) return escapeHtml(value);
+
+  // Sort by start position, merge overlaps
+  marks.sort((a, b) => a.start - b.start);
+  const merged = [marks[0]];
+  for (let i = 1; i < marks.length; i++) {
+    const last = merged[merged.length - 1];
+    if (marks[i].start <= last.end) {
+      last.end = Math.max(last.end, marks[i].end);
+    } else {
+      merged.push(marks[i]);
+    }
+  }
+
+  // Build output with bold spans around matched ranges
+  let result = "";
+  let pos = 0;
+  for (const m of merged) {
+    if (m.start > pos) result += escapeHtml(value.slice(pos, m.start));
+    result += `<strong class="raw-good">${escapeHtml(value.slice(m.start, m.end))}</strong>`;
+    pos = m.end;
+  }
+  if (pos < value.length) result += escapeHtml(value.slice(pos));
+  return result;
 }
 
 function createHeaderItem(key, def, value, allHeaders) {
