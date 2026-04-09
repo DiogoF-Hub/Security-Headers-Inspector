@@ -84,7 +84,7 @@ Each `Set-Cookie` header is analyzed for:
 
 ## Grading System
 
-Grading uses weighted per-header scores matching [securityheaders.com methodology](https://scotthelme.co.uk/tag/securityheaders/):
+Grading uses weighted per-header scores matching securityheaders.com methodology:
 
 | Header | Weight |
 |--------|--------|
