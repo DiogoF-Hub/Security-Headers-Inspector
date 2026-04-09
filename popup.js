@@ -314,22 +314,24 @@ function analyzeCookie(cookieStr) {
   if (hasHttpOnly) flags.push("HttpOnly");
   else issues.push("Missing <code>HttpOnly</code> flag — cookie is accessible to JavaScript (document.cookie).");
 
-  if (sameSite) {
+  if (sameSite && sameSite !== "none") {
     flags.push(`SameSite=${sameSite.charAt(0).toUpperCase() + sameSite.slice(1)}`);
-    if (sameSite === "none" && !hasSecure)
-      issues.push("<code>SameSite=None</code> requires the <code>Secure</code> flag.");
+  } else if (sameSite === "none") {
+    // SameSite=None disables CSRF protection — securityheaders.com treats this as "not a SameSite cookie"
+    issues.push("<code>SameSite=None</code> — this effectively disables SameSite CSRF protection. Consider <code>SameSite=Lax</code> or <code>Strict</code>.");
+    if (!hasSecure) issues.push("<code>SameSite=None</code> also requires the <code>Secure</code> flag.");
   } else {
     issues.push("Missing <code>SameSite</code> attribute — browsers default to Lax, but setting it explicitly is recommended.");
   }
 
+  // Only flag missing prefix for known session cookies (matching securityheaders.com behavior)
+  const sessionPatterns = /^(phpsessid|jsessionid|asp\.net_sessionid|aspsessionid|connect\.sid|session_?id|sessionid|sid|_session|laravel_session|ci_session|cgisessid|wordpress_logged_in|wp-settings)/i;
+  const isSessionCookie = sessionPatterns.test(name);
+
   if (hasPrefix) {
     flags.push("Prefixed");
-  } else if (hasSecure) {
-    // Only flag missing prefix for known session cookies (matching securityheaders.com behavior)
-    const sessionPatterns = /^(phpsessid|jsessionid|asp\.net_sessionid|aspsessionid|connect\.sid|session_?id|sid|_session|laravel_session|ci_session|cgisessid|wordpress_logged_in|wp-settings)/i;
-    if (sessionPatterns.test(name)) {
-      issues.push("No <code>__Secure-</code> or <code>__Host-</code> cookie prefix. Prefixed cookies provide additional protection against cookie injection.");
-    }
+  } else if (isSessionCookie) {
+    issues.push("No <code>__Secure-</code> or <code>__Host-</code> cookie prefix. Prefixed cookies provide additional protection against cookie injection.");
   }
 
   return { name, flags, issues, hasSecure, hasHttpOnly, sameSite, hasPrefix };
@@ -407,9 +409,9 @@ function computeGrade(headers) {
 
 // Ask the background page to fetch headers — the background's fetch triggers
 // webRequest which can see ALL headers including HSTS
-function fetchHeadersViaBackground(url) {
+function fetchHeadersViaBackground(url, tabId) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "fetchHeaders", url: url }, (response) => {
+    chrome.runtime.sendMessage({ type: "fetchHeaders", url: url, tabId: tabId }, (response) => {
       resolve(response);
     });
   });
@@ -485,7 +487,11 @@ function render(data) {
   const cookieSection = document.getElementById("cookie-section");
   const cookieList = document.getElementById("cookie-list");
   cookieList.innerHTML = "";
-  const cookies = data.cookies || [];
+  // Use cookies array from webRequest; fall back to headers["set-cookie"] if empty
+  let cookies = data.cookies || [];
+  if (cookies.length === 0 && headers["set-cookie"]) {
+    cookies = [headers["set-cookie"]];
+  }
 
   if (cookies.length > 0) {
     cookieSection.style.display = "";
@@ -633,7 +639,10 @@ function render(data) {
   }
 
   // Also show individual Set-Cookie lines in raw headers
-  const rawCookies = data.cookies || [];
+  let rawCookies = data.cookies || [];
+  if (rawCookies.length === 0 && headers["set-cookie"]) {
+    rawCookies = [headers["set-cookie"]];
+  }
   if (rawCookies.length > 0) {
     for (const cookieStr of rawCookies) {
       const row = document.createElement("div");
@@ -751,18 +760,18 @@ function escapeHtml(str) {
 // Wire up toggle button
 document.getElementById("toggle-details").addEventListener("click", function () {
   const details = document.getElementById("details");
-  const isCollapsed = details.classList.contains("collapsed");
-  details.classList.toggle("collapsed");
+  const isOpen = details.classList.contains("show");
+  details.classList.toggle("show");
   this.classList.toggle("expanded");
-  this.innerHTML = isCollapsed
-    ? 'Hide Details <span class="arrow">&#9650;</span>'
-    : 'Show Details <span class="arrow">&#9660;</span>';
+  this.innerHTML = isOpen
+    ? 'Show Details <span class="arrow">&#9660;</span>'
+    : 'Hide Details <span class="arrow">&#9650;</span>';
 });
 
 // Wire up raw headers toggle
 document.getElementById("raw-toggle").addEventListener("click", function () {
   const raw = document.getElementById("raw-headers");
-  raw.classList.toggle("collapsed");
+  raw.classList.toggle("show");
   this.classList.toggle("expanded");
 });
 
@@ -838,7 +847,7 @@ function scanActiveTab(forceRefresh = false) {
 
     if (forceRefresh) {
       // Skip cache — always do a fresh fetch via background
-      const data = await fetchHeadersViaBackground(url);
+      const data = await fetchHeadersViaBackground(url, tab.id);
       render(data);
     } else {
       // Try cached headers first
@@ -846,7 +855,7 @@ function scanActiveTab(forceRefresh = false) {
         if (response && response.headers && Object.keys(response.headers).length > 0) {
           render(response);
         } else {
-          const data = await fetchHeadersViaBackground(url);
+          const data = await fetchHeadersViaBackground(url, tab.id);
           render(data);
         }
       });
@@ -860,6 +869,38 @@ document.getElementById("rescan-btn").addEventListener("click", () => {
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 600);
   scanActiveTab(true);
+});
+
+// Theme toggle
+function applyTheme(theme, animate) {
+  const btn = document.getElementById("theme-btn");
+  if (animate) {
+    document.body.classList.add("theme-transition");
+    btn.classList.add("theme-spin");
+    setTimeout(() => {
+      document.body.classList.remove("theme-transition");
+      btn.classList.remove("theme-spin");
+    }, 300);
+  }
+  if (theme === "light") {
+    document.body.classList.add("light");
+    btn.textContent = "\u263D"; // moon crescent
+  } else {
+    document.body.classList.remove("light");
+    btn.textContent = "\u2600"; // sun
+  }
+}
+
+// Load saved theme
+chrome.storage.local.get("theme", (data) => {
+  applyTheme(data.theme || "dark");
+});
+
+document.getElementById("theme-btn").addEventListener("click", () => {
+  const isLight = document.body.classList.contains("light");
+  const newTheme = isLight ? "dark" : "light";
+  applyTheme(newTheme, true);
+  chrome.storage.local.set({ theme: newTheme });
 });
 
 // Init

@@ -32,6 +32,11 @@ chrome.webRequest.onHeadersReceived.addListener(
         tabHeaders[details.tabId].timestamp = Date.now();
       } else {
         // Full response — store all headers
+        // Preserve cookies from previous load if server didn't send new ones
+        // (servers skip Set-Cookie when browser already has the cookies)
+        if (cookies.length === 0 && tabHeaders[details.tabId] && tabHeaders[details.tabId].cookies && tabHeaders[details.tabId].cookies.length > 0) {
+          data.cookies = tabHeaders[details.tabId].cookies;
+        }
         tabHeaders[details.tabId] = data;
       }
 
@@ -174,6 +179,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Do a fetch from the background page — this triggers webRequest
     // which captures ALL headers including HSTS
     const url = message.url;
+    const tabId = message.tabId;
     delete fetchedHeaders[url]; // Clear any stale data
 
     fetch(url, { credentials: "omit", cache: "no-store" })
@@ -182,7 +188,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Small delay to let webRequest listener finish storing
         setTimeout(() => {
           // Check both original URL and final URL (after redirects)
-          sendResponse(fetchedHeaders[url] || fetchedHeaders[finalUrl] || null);
+          const result = fetchedHeaders[url] || fetchedHeaders[finalUrl] || null;
+
+          // Save to tabHeaders so data persists across reloads
+          if (result && tabId) {
+            // Merge: keep existing cookies if the fresh fetch didn't capture new ones
+            if ((!result.cookies || result.cookies.length === 0) && tabHeaders[tabId] && tabHeaders[tabId].cookies && tabHeaders[tabId].cookies.length > 0) {
+              result.cookies = tabHeaders[tabId].cookies;
+            }
+            tabHeaders[tabId] = result;
+
+            // Update badge
+            const grade = computeGrade(result.headers);
+            chrome.browserAction.setBadgeText({ tabId: tabId, text: grade.letter });
+            chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
+          }
+
+          sendResponse(result);
         }, 150);
       })
       .catch(() => {

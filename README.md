@@ -2,7 +2,7 @@
 
 A browser extension (Chrome/Brave) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
 
-**Current Version:** 1.4.7
+**Current Version:** 1.5.3
 
 ## What It Does
 
@@ -225,6 +225,12 @@ For extra privacy, you can set site access to "on click":
 
 | Version | Change |
 |---------|--------|
+| **1.5.3** | Raw header keys neutral for non-security headers; cookie warnings now yellow like other warnings |
+| **1.5.2** | Smooth animations on all expandable sections, theme toggle, and chevrons |
+| **1.5.1** | Light/dark theme toggle with persistent preference via chrome.storage |
+| **1.5.0** | Rescan results now persist in tabHeaders; cookies survive across reloads and rescans |
+| **1.4.9** | Preserve cookies across page reloads when server doesn't re-send Set-Cookie |
+| **1.4.8** | SameSite=None now flagged as warning; cookie fallback from headers; added `sessionid` to session patterns |
 | **1.4.7** | Cookie prefix warning now only for known session cookies (PHPSESSID, JSESSIONID, etc.) matching securityheaders.com |
 | **1.4.6** | Set-Cookie key in raw headers now context-colored: green if all flags present, amber if issues |
 | **1.4.5** | Long header values (e.g. CSP) truncated with preview; full value shown on expand |
@@ -291,5 +297,11 @@ For extra privacy, you can set site access to "on click":
 - **1.4.5** — Long header values (e.g. CSP) truncated to 120-char preview when collapsed; full value revealed on expand
 - **1.4.6** — Set-Cookie key in raw headers now context-colored: green if all cookie flags are present, amber if missing flags or prefix
 - **1.4.7** — Cookie prefix (`__Secure-`/`__Host-`) warning now only triggers for known session cookie names (PHPSESSID, JSESSIONID, ASP.NET_SessionId, etc.), matching securityheaders.com behavior. Non-session cookies like jwt no longer get a false prefix warning
+- **1.4.8** — `SameSite=None` now flagged as warning (matches securityheaders.com treating it as "not a SameSite cookie"). Added fallback: if `data.cookies` array is empty, parses `headers["set-cookie"]` so cookies always show when present. Added `sessionid` to session cookie patterns for prefix checking
+- **1.4.9** — Cookies now persist across page reloads. When the server doesn't re-send Set-Cookie (because the browser already has the cookies), the extension preserves cookies from the previous capture instead of showing an empty section
+- **1.5.0** — Rescan results now saved to tabHeaders so they persist across reloads. Previously, clicking rescan would capture cookies but they'd be lost on the next navigation. Now the full rescan data (headers + cookies) is stored permanently for that tab
+- **1.5.1** — Light/dark theme toggle. Sun/moon button in header bar, preference saved via `chrome.storage.local`. Dark theme remains default. Full CSS variable system for clean theming
+- **1.5.2** — Smooth animations throughout: expandable header/cookie/disclosure/deprecated cards slide open with opacity fade, Show Details and Raw Headers sections animate open/closed, chevrons rotate smoothly, theme toggle icon spins on switch
+- **1.5.3** — Raw header keys now neutral/muted for non-security headers (were all yellow). Cookie warnings use bright yellow (#ffdc00) matching header warning style instead of amber
 
 </details>
