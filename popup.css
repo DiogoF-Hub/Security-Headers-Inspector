@@ -397,6 +397,50 @@ body.theme-transition *::after {
   gap: 6px;
 }
 
+/* Grade impact badges */
+.grade-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.grade-badge.scored {
+  background: rgba(46, 204, 64, 0.1);
+  color: #2ecc40;
+  border: 1px solid rgba(46, 204, 64, 0.2);
+}
+
+.grade-badge.scored-warn {
+  background: rgba(255, 220, 0, 0.1);
+  color: #ffdc00;
+  border: 1px solid rgba(255, 220, 0, 0.2);
+}
+
+body.light .grade-badge.scored-warn {
+  color: #b8960a;
+  border-color: rgba(184, 150, 10, 0.3);
+}
+
+.grade-badge.scored-bad {
+  background: rgba(255, 65, 54, 0.1);
+  color: #ff4136;
+  border: 1px solid rgba(255, 65, 54, 0.2);
+}
+
+.grade-badge.info-only {
+  background: rgba(0, 116, 217, 0.08);
+  color: var(--text-dim);
+  border: 1px solid rgba(0, 116, 217, 0.15);
+}
+
 .expand-chevron {
   font-size: 10px !important;
   color: var(--text-dim) !important;
@@ -604,6 +648,55 @@ body.light .header-item.warn .desc-verdict {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Cookie value blur for privacy */
+.cookie-value-blurred {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  word-break: break-all;
+  line-height: 1.4;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  filter: blur(4px);
+  user-select: none;
+  cursor: pointer;
+  transition: filter 0.25s ease;
+}
+
+.cookie-value-blurred.revealed {
+  filter: none;
+  user-select: text;
+  cursor: text;
+}
+
+.cookie-reveal-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  font-style: italic;
+  transition: opacity 0.2s;
+}
+
+.cookie-value-blurred.revealed + .cookie-reveal-hint {
+  opacity: 0;
+}
+
+/* Raw cookie value blur — only the value between = and ; */
+.raw-cookie-value {
+  transition: filter 0.25s ease;
+}
+
+.raw-cookie-value.blurred {
+  filter: blur(4px);
+  user-select: none;
+  cursor: pointer;
+}
+
+.raw-cookie-value.blurred.revealed {
+  filter: none;
+  user-select: text;
+  cursor: text;
 }
 
 .cookie-item.expanded .expand-chevron {

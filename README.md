@@ -2,7 +2,7 @@
 
 A browser extension (Chrome/Brave) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
 
-**Current Version:** 1.5.3
+**Current Version:** 1.6.0
 
 ## What It Does
 
@@ -49,6 +49,8 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 | **Cross-Origin-Resource-Policy** | Controls who can load your resources |
 | **Cross-Origin-Embedder-Policy** | Requires explicit permission for cross-origin resource loading |
 | **X-XSS-Protection** | Legacy XSS auditor (should be `0` — rely on CSP instead) |
+| **X-Robots-Tag** | Controls search engine indexing at the HTTP level |
+| **Alt-Svc** | Advertises HTTP/3 (QUIC) support for faster, encrypted connections |
 
 ### Information Disclosure Headers (flagged when present)
 
@@ -225,6 +227,9 @@ For extra privacy, you can set site access to "on click":
 
 | Version | Change |
 |---------|--------|
+| **1.6.0** | Cookie values blurred for privacy (click to reveal); grade impact badges on all header cards (+pts / −pts / info) |
+| **1.5.5** | X-Robots-Tag detection — shows search engine indexing directives in Additional Headers section |
+| **1.5.4** | Alt-Svc header detection — shows HTTP/3 (QUIC) availability in Additional Headers section |
 | **1.5.3** | Raw header keys neutral for non-security headers; cookie warnings now yellow like other warnings |
 | **1.5.2** | Smooth animations on all expandable sections, theme toggle, and chevrons |
 | **1.5.1** | Light/dark theme toggle with persistent preference via chrome.storage |
@@ -302,6 +307,9 @@ For extra privacy, you can set site access to "on click":
 - **1.5.0** — Rescan results now saved to tabHeaders so they persist across reloads. Previously, clicking rescan would capture cookies but they'd be lost on the next navigation. Now the full rescan data (headers + cookies) is stored permanently for that tab
 - **1.5.1** — Light/dark theme toggle. Sun/moon button in header bar, preference saved via `chrome.storage.local`. Dark theme remains default. Full CSS variable system for clean theming
 - **1.5.2** — Smooth animations throughout: expandable header/cookie/disclosure/deprecated cards slide open with opacity fade, Show Details and Raw Headers sections animate open/closed, chevrons rotate smoothly, theme toggle icon spins on switch
+- **1.6.0** — Cookie values blurred by default for privacy — click to reveal in both the Cookie section and Raw Headers. Grade impact badges on every header card: scored headers show green "+25 pts" when present, yellow "⚠ 25 pts" when misconfigured, red "−25 pts" when missing. Informational headers show a neutral "info" badge so users know they don't affect the grade
+- **1.5.5** — X-Robots-Tag header detection. Shows search engine indexing directives (noindex, nofollow, none) in the Additional Headers section with expandable detail card
+- **1.5.4** — Alt-Svc header detection. Shows whether the site advertises HTTP/3 (QUIC) support via the `h3` protocol identifier. Displayed in the Additional Headers section with informational status (no grade impact)
 - **1.5.3** — Raw header keys now neutral/muted for non-security headers (were all yellow). Cookie warnings use bright yellow (#ffdc00) matching header warning style instead of amber
 
 </details>

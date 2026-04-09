@@ -193,6 +193,39 @@ const ADDITIONAL_HEADERS = {
         return { status: "good", msg: "Set to '0' — legacy XSS Auditor is disabled. CSP should be used for XSS protection instead." };
       return { status: "warn", msg: `Set to "${val.trim()}" — consider setting to '0' to disable the flawed legacy auditor, and rely on CSP instead.` };
     }
+  },
+  "x-robots-tag": {
+    label: "X-Robots-Tag",
+    about: "The X-Robots-Tag HTTP header controls how search engines index and display your pages. It works like the <code>&lt;meta name=\"robots\"&gt;</code> HTML tag but applies at the HTTP level — useful for non-HTML resources (PDFs, images) or when you want server-wide control without modifying page content.",
+    good: "Controlling search engine behavior lets you prevent sensitive pages from appearing in search results, stop caching of private content, and manage how your site is represented in search engines. For internal tools or private services, <code>noindex, nofollow</code> keeps them out of search entirely.",
+    recommendation: "Set to <code>noindex, nofollow</code> for private or internal pages. Use <code>noindex</code> alone to prevent indexing but still allow link following. For public pages, this header is usually not needed — search engines index by default.",
+    evaluate: (val) => {
+      if (!val) return { status: "info", msg: "Not set — search engines will index this page by default. Set this header if you want to control search engine behavior at the HTTP level." };
+      const lower = val.toLowerCase();
+      const hasNoindex = /noindex/.test(lower);
+      const hasNofollow = /nofollow/.test(lower);
+      const hasNone = /\bnone\b/.test(lower);
+      if (hasNone || (hasNoindex && hasNofollow))
+        return { status: "good", msg: `Set to "${val.trim()}" — page is hidden from search engines and links are not followed.` };
+      if (hasNoindex)
+        return { status: "good", msg: `Set to "${val.trim()}" — page will not appear in search results.` };
+      if (hasNofollow)
+        return { status: "info", msg: `Set to "${val.trim()}" — search engines won't follow links on this page, but the page itself may still be indexed.` };
+      return { status: "info", msg: `Set to "${val.trim()}".` };
+    }
+  },
+  "alt-svc": {
+    label: "Alt-Svc",
+    about: "The Alt-Svc (Alternative Services) header advertises that the same resource is available over a different protocol or network endpoint. Most commonly, it tells the browser that HTTP/3 (QUIC) is available, enabling faster, more reliable connections with built-in encryption and reduced latency.",
+    good: "HTTP/3 uses QUIC, a UDP-based transport protocol with built-in TLS 1.3 encryption. It eliminates head-of-line blocking, reduces connection setup time (0-RTT), and handles network changes (e.g., switching from Wi-Fi to mobile) more gracefully than TCP.",
+    recommendation: "If your server supports HTTP/3 (QUIC), this header is set automatically. Major web servers (Nginx, Caddy, LiteSpeed) and CDNs (Cloudflare, Fastly) support it. No action needed if you see <code>h3</code> in the value.",
+    evaluate: (val) => {
+      if (!val) return { status: "info", msg: "Not set — the site is not advertising HTTP/3 (QUIC) support. The site uses HTTP/1.1 or HTTP/2 only." };
+      const hasH3 = /h3/.test(val);
+      if (hasH3)
+        return { status: "good", msg: "HTTP/3 (QUIC) is available — faster, more reliable connections with built-in TLS 1.3 encryption." };
+      return { status: "info", msg: `Alternative service advertised: "${val.trim()}".` };
+    }
   }
 };
 
@@ -513,12 +546,18 @@ function render(data) {
 
       const statusIcon = allGood ? '<span class="status-icon good">✔</span>' : '<span class="status-icon warn">⚠</span>';
 
+      // Extract cookie value (everything after name=)
+      const eqIdx = cookieStr.indexOf("=");
+      const cookieValue = eqIdx !== -1 ? cookieStr.substring(eqIdx + 1).split(";")[0].trim() : "";
+
       item.innerHTML = `
         <div class="cookie-header-row">
           <span class="cookie-name"><span class="expand-chevron">▸</span> ${escapeHtml(analysis.name)}</span>
           ${statusIcon}
         </div>
         <div class="cookie-flags">${flagsHtml}${missingHtml}${missingHttp}${missingSame}${missingPrefix}</div>
+        <div class="cookie-value-blurred">${escapeHtml(cookieValue || "(empty)")}</div>
+        <div class="cookie-reveal-hint">Click to reveal value</div>
         <div class="cookie-details">
           ${analysis.issues.length > 0 ? '<div class="desc-verdict">' + analysis.issues.join('<br>') + '</div>' : '<div class="desc-verdict" style="color:#2ecc40;">All recommended cookie security flags are present.</div>'}
           <div class="desc-section">
@@ -534,6 +573,13 @@ function render(data) {
 
       item.querySelector(".cookie-header-row").addEventListener("click", () => {
         item.classList.toggle("expanded");
+      });
+
+      // Click to reveal blurred cookie value
+      const blurredVal = item.querySelector(".cookie-value-blurred");
+      blurredVal.addEventListener("click", (e) => {
+        e.stopPropagation();
+        blurredVal.classList.toggle("revealed");
       });
 
       cookieList.appendChild(item);
@@ -649,7 +695,35 @@ function render(data) {
       const cookieAnalysis = analyzeCookie(cookieStr);
       const cookieOk = cookieAnalysis.issues.length === 0;
       row.className = `raw-row ${cookieOk ? "raw-cookie-good" : "raw-cookie-warn"}`;
-      row.innerHTML = `<span class="raw-key">set-cookie</span><span class="raw-val">${highlightGoodTokens("set-cookie", cookieStr)}</span>`;
+
+      // Split cookie into name=value and ;flags so we only blur the value
+      const eqIdx = cookieStr.indexOf("=");
+      const semiIdx = cookieStr.indexOf(";");
+      let namePart, valuePart, flagsPart;
+      if (eqIdx !== -1) {
+        namePart = cookieStr.substring(0, eqIdx + 1); // "name="
+        if (semiIdx !== -1 && semiIdx > eqIdx) {
+          valuePart = cookieStr.substring(eqIdx + 1, semiIdx);
+          flagsPart = cookieStr.substring(semiIdx); // "; Secure; HttpOnly; ..."
+        } else {
+          valuePart = cookieStr.substring(eqIdx + 1);
+          flagsPart = "";
+        }
+      } else {
+        namePart = cookieStr;
+        valuePart = "";
+        flagsPart = "";
+      }
+
+      const flagsHtml = flagsPart ? highlightGoodTokens("set-cookie", flagsPart) : "";
+      row.innerHTML = `<span class="raw-key">set-cookie</span><span class="raw-val">${escapeHtml(namePart)}<span class="raw-cookie-value blurred">${escapeHtml(valuePart)}</span>${flagsHtml}</span>`;
+
+      // Click to reveal only the blurred value portion
+      const blurredSpan = row.querySelector(".raw-cookie-value");
+      blurredSpan.addEventListener("click", (e) => {
+        e.stopPropagation();
+        blurredSpan.classList.toggle("revealed");
+      });
       rawContainer.appendChild(row);
     }
   }
@@ -718,11 +792,28 @@ function createHeaderItem(key, def, value, allHeaders) {
 
   const statusIcons = { good: "\u2714", bad: "\u2718", warn: "\u26A0", info: "\u2139" };
 
+  // Determine grade impact badge
+  const isScored = key in HEADER_WEIGHTS;
+  let gradeBadgeHtml = "";
+  if (isScored) {
+    const weight = HEADER_WEIGHTS[key];
+    if (result.status === "good") {
+      gradeBadgeHtml = `<span class="grade-badge scored">+${weight} pts</span>`;
+    } else if (result.status === "warn") {
+      gradeBadgeHtml = `<span class="grade-badge scored-warn">⚠ ${weight} pts</span>`;
+    } else {
+      gradeBadgeHtml = `<span class="grade-badge scored-bad">−${weight} pts</span>`;
+    }
+  } else {
+    gradeBadgeHtml = `<span class="grade-badge info-only">info</span>`;
+  }
+
   item.innerHTML = `
     <div class="header-name">
       <span class="header-label">
         <span class="expand-chevron">&#9656;</span>
         ${def.label}
+        ${gradeBadgeHtml}
       </span>
       <span class="status-icon ${result.status}">${statusIcons[result.status]}</span>
     </div>
