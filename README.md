@@ -127,7 +127,7 @@ Brave blocks `chrome.webRequest` in Manifest V3 extensions (it conflicts with Br
 │         ├── Captures ALL response headers (incl. HSTS)  │
 │         ├── Stores in memory keyed by tab ID            │
 │         ├── Collects Set-Cookie into separate array     │
-│         ├── Handles 304 Not Modified (preserves cache)   │
+│         ├── Handles 304 Not Modified (preserves cache)  │
 │         └── Computes grade → sets badge                 │
 │                                                         │
 │  User clicks extension icon                             │
