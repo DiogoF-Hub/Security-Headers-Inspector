@@ -325,8 +325,11 @@ function analyzeCookie(cookieStr) {
   if (hasPrefix) {
     flags.push("Prefixed");
   } else if (hasSecure) {
-    // Only suggest prefix if Secure is already set (prefix requires Secure)
-    issues.push("No <code>__Secure-</code> or <code>__Host-</code> cookie prefix. Prefixed cookies provide additional protection against cookie injection.");
+    // Only flag missing prefix for known session cookies (matching securityheaders.com behavior)
+    const sessionPatterns = /^(phpsessid|jsessionid|asp\.net_sessionid|aspsessionid|connect\.sid|session_?id|sid|_session|laravel_session|ci_session|cgisessid|wordpress_logged_in|wp-settings)/i;
+    if (sessionPatterns.test(name)) {
+      issues.push("No <code>__Secure-</code> or <code>__Host-</code> cookie prefix. Prefixed cookies provide additional protection against cookie injection.");
+    }
   }
 
   return { name, flags, issues, hasSecure, hasHttpOnly, sameSite, hasPrefix };
@@ -634,7 +637,9 @@ function render(data) {
   if (rawCookies.length > 0) {
     for (const cookieStr of rawCookies) {
       const row = document.createElement("div");
-      row.className = "raw-row raw-cookie";
+      const cookieAnalysis = analyzeCookie(cookieStr);
+      const cookieOk = cookieAnalysis.issues.length === 0;
+      row.className = `raw-row ${cookieOk ? "raw-cookie-good" : "raw-cookie-warn"}`;
       row.innerHTML = `<span class="raw-key">set-cookie</span><span class="raw-val">${highlightGoodTokens("set-cookie", cookieStr)}</span>`;
       rawContainer.appendChild(row);
     }

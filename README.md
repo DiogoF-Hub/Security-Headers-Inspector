@@ -2,7 +2,7 @@
 
 A browser extension (Chrome/Brave) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
 
-**Current Version:** 1.4.5
+**Current Version:** 1.4.7
 
 ## What It Does
 
@@ -225,6 +225,8 @@ For extra privacy, you can set site access to "on click":
 
 | Version | Change |
 |---------|--------|
+| **1.4.7** | Cookie prefix warning now only for known session cookies (PHPSESSID, JSESSIONID, etc.) matching securityheaders.com |
+| **1.4.6** | Set-Cookie key in raw headers now context-colored: green if all flags present, amber if issues |
 | **1.4.5** | Long header values (e.g. CSP) truncated with preview; full value shown on expand |
 | **1.4.4** | Raw headers highlight good security tokens in bold green; individual Set-Cookie rows in raw headers |
 | **1.4.3** | Expandable detail cards for Cookies, Information Disclosure, and Deprecated Headers |
@@ -287,5 +289,7 @@ For extra privacy, you can set site access to "on click":
 - **1.4.3** — Expandable detail cards for Cookies, Disclosure, and Deprecated sections
 - **1.4.4** — Bold green highlights for good security tokens in raw headers; individual Set-Cookie rows
 - **1.4.5** — Long header values (e.g. CSP) truncated to 120-char preview when collapsed; full value revealed on expand
+- **1.4.6** — Set-Cookie key in raw headers now context-colored: green if all cookie flags are present, amber if missing flags or prefix
+- **1.4.7** — Cookie prefix (`__Secure-`/`__Host-`) warning now only triggers for known session cookie names (PHPSESSID, JSESSIONID, ASP.NET_SessionId, etc.), matching securityheaders.com behavior. Non-session cookies like jwt no longer get a false prefix warning
 
 </details>

@@ -718,8 +718,12 @@ body::-webkit-scrollbar-thumb {
   color: #2ecc40;
 }
 
-.raw-row.raw-cookie .raw-key {
-  color: #e6db74;
+.raw-row.raw-cookie-good .raw-key {
+  color: #2ecc40;
+}
+
+.raw-row.raw-cookie-warn .raw-key {
+  color: #c0a060;
 }
 
 .raw-row.raw-disclosure .raw-key {
