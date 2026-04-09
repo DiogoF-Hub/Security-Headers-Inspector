@@ -325,6 +325,18 @@ body::-webkit-scrollbar-thumb {
   line-height: 1.5;
 }
 
+.value-full {
+  display: none;
+}
+
+.header-item.expanded .value-preview {
+  display: none;
+}
+
+.header-item.expanded .value-full {
+  display: inline;
+}
+
 .header-desc {
   margin-top: 8px;
   font-size: 12px;

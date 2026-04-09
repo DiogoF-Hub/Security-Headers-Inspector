@@ -2,7 +2,7 @@
 
 A browser extension (Chrome/Brave) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
 
-**Current Version:** 1.4.4
+**Current Version:** 1.4.5
 
 ## What It Does
 
@@ -225,6 +225,7 @@ For extra privacy, you can set site access to "on click":
 
 | Version | Change |
 |---------|--------|
+| **1.4.5** | Long header values (e.g. CSP) truncated with preview; full value shown on expand |
 | **1.4.4** | Raw headers highlight good security tokens in bold green; individual Set-Cookie rows in raw headers |
 | **1.4.3** | Expandable detail cards for Cookies, Information Disclosure, and Deprecated Headers |
 | **1.4.2** | Weighted scoring system matching securityheaders.com (per-header weights, CSP penalties, percentage thresholds) |
@@ -285,5 +286,6 @@ For extra privacy, you can set site access to "on click":
 - **1.4.2** — Weighted scoring system matching securityheaders.com methodology
 - **1.4.3** — Expandable detail cards for Cookies, Disclosure, and Deprecated sections
 - **1.4.4** — Bold green highlights for good security tokens in raw headers; individual Set-Cookie rows
+- **1.4.5** — Long header values (e.g. CSP) truncated to 120-char preview when collapsed; full value revealed on expand
 
 </details>

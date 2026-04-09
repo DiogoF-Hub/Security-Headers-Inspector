@@ -712,7 +712,7 @@ function createHeaderItem(key, def, value, allHeaders) {
       </span>
       <span class="status-icon ${result.status}">${statusIcons[result.status]}</span>
     </div>
-    <div class="header-value">${value ? escapeHtml(value) : '<em style="color:#ff4136;">Not set</em>'}</div>
+    <div class="header-value">${value ? (value.length > 120 ? `<span class="value-preview">${escapeHtml(value.substring(0, 120))}…</span><span class="value-full">${escapeHtml(value)}</span>` : escapeHtml(value)) : '<em style="color:#ff4136;">Not set</em>'}</div>
     <div class="header-desc">
       <div class="desc-verdict">${result.msg}</div>
       <div class="desc-section">
