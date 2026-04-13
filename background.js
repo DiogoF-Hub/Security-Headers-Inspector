@@ -2,8 +2,20 @@
 // Store headers per tab in memory (persistent background never goes idle).
 const tabHeaders = {};
 
-// Also store headers captured from background fetches (keyed by URL)
+// Also store headers captured from background fetches (keyed by URL).
+// These are short-lived — only needed for the fetch→webRequest handoff.
 const fetchedHeaders = {};
+
+// Prune stale fetchedHeaders entries every 60 seconds to prevent memory leak.
+// Entries older than 30s have already been consumed or abandoned.
+setInterval(() => {
+  const cutoff = Date.now() - 30000;
+  for (const url of Object.keys(fetchedHeaders)) {
+    if (fetchedHeaders[url].timestamp < cutoff) {
+      delete fetchedHeaders[url];
+    }
+  }
+}, 60000);
 
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
@@ -146,25 +158,105 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   try { hostname = new URL(tab.url).hostname; } catch { return; }
 
   if (info.menuItemId === "scan-securityheaders") {
-    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(hostname)}&hide=on&followRedirects=on` });
+    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(tab.url)}&hide=on&followRedirects=on` });
   } else if (info.menuItemId === "scan-ssllabs") {
     chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest` });
   }
 });
 chrome.runtime.onStartup.addListener(scanAllTabs);
 
-// When a tab finishes loading, ensure the badge is set.
+// Check if captured data looks incomplete — missing headers that webRequest
+// should have seen. This triggers a supplementary fetch to fill gaps.
+function needsSupplementaryFetch(tabId, url) {
+  const data = tabHeaders[tabId];
+  // No data at all — definitely need to fetch
+  if (!data || !data.headers) return true;
+  // For HTTPS sites, check if key security headers are suspiciously absent.
+  // HSTS is the most commonly missed header (stripped from cache/bfcache).
+  // If we have very few headers overall, the capture was likely incomplete.
+  if (url.startsWith("https://")) {
+    const h = data.headers;
+    const headerCount = Object.keys(h).length;
+    // Very few headers suggests a cache hit with minimal data
+    if (headerCount < 5) return true;
+    // HSTS is the header most often missed from cached responses
+    if (!h["strict-transport-security"]) return true;
+  }
+  return false;
+}
+
+// Merge headers from a supplementary fetch into existing tab data.
+// Only adds missing headers — never overwrites what webRequest already captured.
+function mergeSupplementaryData(tabId, webReqData) {
+  if (!webReqData || !webReqData.headers) return;
+
+  const existing = tabHeaders[tabId];
+  if (existing && existing.headers) {
+    let changed = false;
+    for (const [name, value] of Object.entries(webReqData.headers)) {
+      if (!existing.headers[name]) {
+        existing.headers[name] = value;
+        changed = true;
+      }
+    }
+    if (webReqData.cookies && webReqData.cookies.length > 0 && (!existing.cookies || existing.cookies.length === 0)) {
+      existing.cookies = webReqData.cookies;
+      changed = true;
+    }
+    if (changed) {
+      const newGrade = computeGrade(existing.headers);
+      chrome.browserAction.setBadgeText({ tabId: tabId, text: newGrade.letter });
+      chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: newGrade.color });
+    }
+  } else {
+    // No existing data — use the fetch result directly
+    tabHeaders[tabId] = {
+      url: webReqData.url,
+      statusCode: webReqData.statusCode,
+      headers: { ...webReqData.headers },
+      cookies: webReqData.cookies || [],
+      timestamp: Date.now()
+    };
+    const newGrade = computeGrade(tabHeaders[tabId].headers);
+    chrome.browserAction.setBadgeText({ tabId: tabId, text: newGrade.letter });
+    chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: newGrade.color });
+  }
+}
+
+// When a tab finishes loading, ensure the badge is set and headers are complete.
 // Chrome/Brave clears per-tab badges on navigation, so we must re-apply.
+// If key headers appear missing (e.g. HSTS from cached responses), do a
+// supplementary fetch to fill the gaps without fetching for every single tab.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     if (tabHeaders[tabId]) {
-      // webRequest already captured headers — just re-apply the badge
       const grade = computeGrade(tabHeaders[tabId].headers);
       chrome.browserAction.setBadgeText({ tabId: tabId, text: grade.letter });
       chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
-    } else {
-      // No cached data (tab loaded before extension, or cached page) — scan it
-      scanTab(tab);
+    }
+
+    if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://")) && needsSupplementaryFetch(tabId, tab.url)) {
+      const url = tab.url;
+      delete fetchedHeaders[url];
+
+      fetch(url, { credentials: "omit", cache: "no-store" })
+        .then(() => {
+          setTimeout(() => {
+            const webReqData = fetchedHeaders[url];
+            // Also check final URL after redirects
+            if (!webReqData) {
+              for (const key of Object.keys(fetchedHeaders)) {
+                if (fetchedHeaders[key].timestamp > Date.now() - 5000) {
+                  mergeSupplementaryData(tabId, fetchedHeaders[key]);
+                  return;
+                }
+              }
+              return;
+            }
+            mergeSupplementaryData(tabId, webReqData);
+          }, 150);
+        })
+        .catch(() => {});
     }
   }
 });
@@ -225,12 +317,6 @@ const SECURITY_HEADERS = [
   "x-frame-options"
 ];
 
-const BONUS_HEADERS = [
-  "cross-origin-opener-policy",
-  "cross-origin-resource-policy",
-  "cross-origin-embedder-policy"
-];
-
 // Weighted scoring matching securityheaders.com methodology
 // Source: https://snyk.io/blog/website-security-score-explained/
 // and https://scotthelme.co.uk/scoring-transparency-on-securityheaders-io/
@@ -243,6 +329,29 @@ const HEADER_WEIGHTS = {
   "permissions-policy":        15
 };
 const MAX_SCORE = 120; // sum of all weights
+
+// CSP quality penalty — caps score if script-src has unsafe-inline/unsafe-eval
+// IMPORTANT: keep in sync with the identical function in popup.js
+function applyCSPPenalty(csp, score) {
+  if (!csp) return score;
+  const directives = {};
+  csp.split(";").forEach((d) => {
+    const parts = d.trim().split(/\s+/);
+    if (parts.length > 0) directives[parts[0]] = parts.slice(1);
+  });
+  const scriptSrc = directives["script-src"] || directives["default-src"] || [];
+  const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
+  const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
+  const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
+
+  if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
+    score = Math.min(score, MAX_SCORE * 0.82);
+  }
+  if (scriptSrc.some(s => s === "'unsafe-eval'")) {
+    score = Math.min(score, MAX_SCORE * 0.82);
+  }
+  return score;
+}
 
 function computeGrade(headers) {
   const csp = headers["content-security-policy"] || "";
@@ -260,27 +369,7 @@ function computeGrade(headers) {
     }
   }
 
-  // CSP quality penalties (caps effective score)
-  if (csp) {
-    const directives = {};
-    csp.split(";").forEach((d) => {
-      const parts = d.trim().split(/\s+/);
-      if (parts.length > 0) directives[parts[0]] = parts.slice(1);
-    });
-    const scriptSrc = directives["script-src"] || directives["default-src"] || [];
-    const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
-    const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
-    const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
-
-    // unsafe-inline without strict-dynamic/nonce/hash: CSP is significantly weakened
-    if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
-      score = Math.min(score, MAX_SCORE * 0.82); // cap below A+
-    }
-    // unsafe-eval: penalty
-    if (scriptSrc.some(s => s === "'unsafe-eval'")) {
-      score = Math.min(score, MAX_SCORE * 0.82);
-    }
-  }
+  score = applyCSPPenalty(csp, score);
 
   const pct = (score / MAX_SCORE) * 100;
   let letter, color;
@@ -293,9 +382,9 @@ function computeGrade(headers) {
     letter = "B"; color = "#99cc00";
   } else if (pct >= 50) {
     letter = "C"; color = "#ffdc00";
-  } else if (pct >= 29) {
+  } else if (pct >= 15) {
     letter = "D"; color = "#ff851b";
-  } else if (pct >= 14) {
+  } else if (pct >= 5) {
     letter = "E"; color = "#ff4136";
   } else {
     letter = "F"; color = "#cc0000";

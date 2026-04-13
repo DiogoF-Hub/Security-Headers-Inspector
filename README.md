@@ -2,7 +2,7 @@
 
 A browser extension (Chrome/Brave) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
 
-**Current Version:** 1.6.0
+**Current Version:** 1.6.2
 
 ## What It Does
 
@@ -106,9 +106,9 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 | **A** | >= 75% |
 | **B** | >= 60% |
 | **C** | >= 50% |
-| **D** | >= 29% |
-| **E** | >= 14% |
-| **F** | < 14% |
+| **D** | >= 15% |
+| **E** | >= 5% |
+| **F** | < 5% |
 
 ## Architecture
 
@@ -227,6 +227,8 @@ For extra privacy, you can set site access to "on click":
 
 | Version | Change |
 |---------|--------|
+| **1.6.2** | Code quality: dead code removal, memory leak fix, smarter supplementary fetch, faster escapeHtml, UI reset on rescan, DRY cookie/CSP logic |
+| **1.6.1** | Fix intermittent missing headers (HSTS, etc.) — supplementary background fetch merges missing headers on every page load |
 | **1.6.0** | Cookie values blurred for privacy (click to reveal); grade impact badges on all header cards (+pts / −pts / info) |
 | **1.5.5** | X-Robots-Tag detection — shows search engine indexing directives in Additional Headers section |
 | **1.5.4** | Alt-Svc header detection — shows HTTP/3 (QUIC) availability in Additional Headers section |
@@ -307,6 +309,8 @@ For extra privacy, you can set site access to "on click":
 - **1.5.0** — Rescan results now saved to tabHeaders so they persist across reloads. Previously, clicking rescan would capture cookies but they'd be lost on the next navigation. Now the full rescan data (headers + cookies) is stored permanently for that tab
 - **1.5.1** — Light/dark theme toggle. Sun/moon button in header bar, preference saved via `chrome.storage.local`. Dark theme remains default. Full CSS variable system for clean theming
 - **1.5.2** — Smooth animations throughout: expandable header/cookie/disclosure/deprecated cards slide open with opacity fade, Show Details and Raw Headers sections animate open/closed, chevrons rotate smoothly, theme toggle icon spins on switch
+- **1.6.2** — Code quality refactor: removed unused `BONUS_HEADERS` array; extracted shared `applyCSPPenalty()` function to deduplicate CSP parsing between background.js and popup.js; added periodic `fetchedHeaders` pruning (30s TTL) to prevent memory leak in long sessions; supplementary fetch now only fires when key headers are missing (not every tab load); fixed stale `response` reference in setTimeout closure; replaced DOM-based `escapeHtml()` with string-replace for performance; `render()` now fully resets UI state on rescan; deduplicated cookie fallback logic into single `resolvedCookies` variable
+- **1.6.1** — Fix intermittent missing headers on initial page load. When `webRequest` misses headers (cached pages, bfcache, 304 with no prior data), a supplementary background `fetch()` with `cache: "no-store"` now runs on every tab completion and merges any missing headers into the existing capture. Eliminates the need to manually rescan for HSTS and other headers
 - **1.6.0** — Cookie values blurred by default for privacy — click to reveal in both the Cookie section and Raw Headers. Grade impact badges on every header card: scored headers show green "+25 pts" when present, yellow "⚠ 25 pts" when misconfigured, red "−25 pts" when missing. Informational headers show a neutral "info" badge so users know they don't affect the grade
 - **1.5.5** — X-Robots-Tag header detection. Shows search engine indexing directives (noindex, nofollow, none) in the Additional Headers section with expandable detail card
 - **1.5.4** — Alt-Svc header detection. Shows whether the site advertises HTTP/3 (QUIC) support via the `h3` protocol identifier. Displayed in the Additional Headers section with informational status (no grade impact)

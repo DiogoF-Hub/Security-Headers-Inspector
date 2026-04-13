@@ -382,6 +382,29 @@ const HEADER_WEIGHTS = {
 };
 const MAX_SCORE = 120;
 
+// CSP quality penalty — caps score if script-src has unsafe-inline/unsafe-eval
+// IMPORTANT: keep in sync with the identical function in background.js
+function applyCSPPenalty(csp, score) {
+  if (!csp) return score;
+  const directives = {};
+  csp.split(";").forEach((d) => {
+    const parts = d.trim().split(/\s+/);
+    if (parts.length > 0) directives[parts[0]] = parts.slice(1);
+  });
+  const scriptSrc = directives["script-src"] || directives["default-src"] || [];
+  const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
+  const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
+  const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
+
+  if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
+    score = Math.min(score, MAX_SCORE * 0.82);
+  }
+  if (scriptSrc.some(s => s === "'unsafe-eval'")) {
+    score = Math.min(score, MAX_SCORE * 0.82);
+  }
+  return score;
+}
+
 function computeGrade(headers) {
   const securityKeys = Object.keys(SECURITY_HEADERS);
   const csp = headers["content-security-policy"] || "";
@@ -398,25 +421,7 @@ function computeGrade(headers) {
     }
   }
 
-  // CSP quality penalties
-  if (csp) {
-    const directives = {};
-    csp.split(";").forEach((d) => {
-      const parts = d.trim().split(/\s+/);
-      if (parts.length > 0) directives[parts[0]] = parts.slice(1);
-    });
-    const scriptSrc = directives["script-src"] || directives["default-src"] || [];
-    const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
-    const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
-    const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
-
-    if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
-      score = Math.min(score, MAX_SCORE * 0.82);
-    }
-    if (scriptSrc.some(s => s === "'unsafe-eval'")) {
-      score = Math.min(score, MAX_SCORE * 0.82);
-    }
-  }
+  score = applyCSPPenalty(csp, score);
 
   const pct = (score / MAX_SCORE) * 100;
   let letter, cssClass;
@@ -429,9 +434,9 @@ function computeGrade(headers) {
     letter = "B"; cssClass = "grade-b";
   } else if (pct >= 50) {
     letter = "C"; cssClass = "grade-c";
-  } else if (pct >= 29) {
+  } else if (pct >= 15) {
     letter = "D"; cssClass = "grade-d";
-  } else if (pct >= 14) {
+  } else if (pct >= 5) {
     letter = "E"; cssClass = "grade-e";
   } else {
     letter = "F"; cssClass = "grade-f";
@@ -460,6 +465,22 @@ function render(data) {
   const quickStatus = document.getElementById("quick-status");
   const toggleBtn = document.getElementById("toggle-details");
 
+  // Reset UI state so rescans start fresh
+  noData.classList.add("hidden");
+  header.style.display = "";
+  quickStatus.style.display = "";
+  toggleBtn.style.display = "";
+  document.getElementById("external-scans").style.display = "";
+  document.getElementById("internal-page").classList.add("hidden");
+
+  // Reset expandable sections to collapsed
+  document.getElementById("details").classList.remove("show");
+  document.getElementById("raw-headers").classList.remove("show");
+  toggleBtn.classList.remove("expanded");
+  toggleBtn.innerHTML = 'Show Details <span class="arrow">&#9660;</span>';
+  const rawToggle = document.getElementById("raw-toggle");
+  rawToggle.classList.remove("expanded");
+
   if (!data || !data.headers || Object.keys(data.headers).length === 0) {
     noData.classList.remove("hidden");
     header.style.display = "none";
@@ -472,6 +493,12 @@ function render(data) {
   const headers = data.headers;
   currentHeaders = headers;
   const grade = computeGrade(headers);
+
+  // Resolve cookies once — webRequest array, falling back to headers["set-cookie"]
+  let resolvedCookies = data.cookies || [];
+  if (resolvedCookies.length === 0 && headers["set-cookie"]) {
+    resolvedCookies = [headers["set-cookie"]];
+  }
 
   // Grade badge
   const badge = document.getElementById("grade-badge");
@@ -520,15 +547,9 @@ function render(data) {
   const cookieSection = document.getElementById("cookie-section");
   const cookieList = document.getElementById("cookie-list");
   cookieList.innerHTML = "";
-  // Use cookies array from webRequest; fall back to headers["set-cookie"] if empty
-  let cookies = data.cookies || [];
-  if (cookies.length === 0 && headers["set-cookie"]) {
-    cookies = [headers["set-cookie"]];
-  }
-
-  if (cookies.length > 0) {
+  if (resolvedCookies.length > 0) {
     cookieSection.style.display = "";
-    for (const cookieStr of cookies) {
+    for (const cookieStr of resolvedCookies) {
       const analysis = analyzeCookie(cookieStr);
       const allGood = analysis.issues.length === 0;
 
@@ -673,7 +694,7 @@ function render(data) {
   rawContainer.innerHTML = "";
   const sortedKeys = Object.keys(headers).sort();
   for (const key of sortedKeys) {
-    if (key === "set-cookie" && data.cookies && data.cookies.length > 0) continue; // shown individually below
+    if (key === "set-cookie" && resolvedCookies.length > 0) continue; // shown individually below
     const row = document.createElement("div");
     let rowClass = "raw-row";
     if (securitySet.has(key)) rowClass += " raw-security";
@@ -685,12 +706,8 @@ function render(data) {
   }
 
   // Also show individual Set-Cookie lines in raw headers
-  let rawCookies = data.cookies || [];
-  if (rawCookies.length === 0 && headers["set-cookie"]) {
-    rawCookies = [headers["set-cookie"]];
-  }
-  if (rawCookies.length > 0) {
-    for (const cookieStr of rawCookies) {
+  if (resolvedCookies.length > 0) {
+    for (const cookieStr of resolvedCookies) {
       const row = document.createElement("div");
       const cookieAnalysis = analyzeCookie(cookieStr);
       const cookieOk = cookieAnalysis.issues.length === 0;
@@ -741,6 +758,8 @@ const GOOD_TOKENS = {
   "cross-origin-embedder-policy": [/\brequire-corp\b/g, /\bcredentialless\b/g],
   "content-security-policy": [/\b'strict-dynamic'\b/g, /\b'nonce-[^']+'\b/g, /\b'sha(256|384|512)-[^']+'\b/g],
   "permissions-policy": [/[a-z-]+=\(\)/g],
+  "alt-svc": [/h3(?:=[^,;]*)?/g],
+  "x-robots-tag": [/\bnoindex\b/gi, /\bnofollow\b/gi, /\bnone\b/gi, /\bnoarchive\b/gi, /\bnosnippet\b/gi],
 };
 
 function highlightGoodTokens(headerName, value) {
@@ -843,9 +862,7 @@ function createHeaderItem(key, def, value, allHeaders) {
 }
 
 function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 // Wire up toggle button
@@ -882,24 +899,27 @@ document.getElementById("copy-raw-btn").addEventListener("click", function () {
   });
 });
 
-// External scan buttons
-function getHostname() {
-  const el = document.getElementById("site-url");
-  return el ? el.textContent.trim() : null;
+// External scan buttons — get full URL and hostname from the active tab
+function getActiveTabInfo(callback) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0] || !tabs[0].url) return;
+    const url = tabs[0].url;
+    let hostname;
+    try { hostname = new URL(url).hostname; } catch { return; }
+    callback(url, hostname);
+  });
 }
 
 document.getElementById("scan-secheaders").addEventListener("click", () => {
-  const host = getHostname();
-  if (host && host !== "Loading...") {
-    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(host)}&hide=on&followRedirects=on`, active: false });
-  }
+  getActiveTabInfo((url) => {
+    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(url)}&hide=on&followRedirects=on`, active: false });
+  });
 });
 
 document.getElementById("scan-ssllabs").addEventListener("click", () => {
-  const host = getHostname();
-  if (host && host !== "Loading...") {
-    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(host)}&hideResults=on&latest`, active: false });
-  }
+  getActiveTabInfo((_url, hostname) => {
+    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest`, active: false });
+  });
 });
 
 function renderInternalPage(url) {
