@@ -1,21 +1,45 @@
-// MV2 persistent background page — webRequest works fully here.
-// Store headers per tab in memory (persistent background never goes idle).
-const tabHeaders = {};
+// MV3 service worker — webRequest observation is still available.
+// State is persisted via chrome.storage.session since service workers are ephemeral.
 
-// Also store headers captured from background fetches (keyed by URL).
-// These are short-lived — only needed for the fetch→webRequest handoff.
-const fetchedHeaders = {};
+// Allow storage.session to be accessed by the popup too
+chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
 
-// Prune stale fetchedHeaders entries every 60 seconds to prevent memory leak.
-// Entries older than 30s have already been consumed or abandoned.
-setInterval(() => {
-  const cutoff = Date.now() - 30000;
-  for (const url of Object.keys(fetchedHeaders)) {
-    if (fetchedHeaders[url].timestamp < cutoff) {
-      delete fetchedHeaders[url];
+// --- Storage helpers ---
+// Service workers can go idle at any time, so all state lives in storage.session.
+// We keep a local cache to avoid async reads on every webRequest event.
+let tabHeaders = {};
+let fetchedHeaders = {};
+
+// Load state from storage on service worker startup
+chrome.storage.session.get(["tabHeaders", "fetchedHeaders"], (result) => {
+  if (result.tabHeaders) tabHeaders = result.tabHeaders;
+  if (result.fetchedHeaders) fetchedHeaders = result.fetchedHeaders;
+});
+
+function saveTabHeaders() {
+  chrome.storage.session.set({ tabHeaders });
+}
+
+function saveFetchedHeaders() {
+  chrome.storage.session.set({ fetchedHeaders });
+}
+
+// Prune stale fetchedHeaders entries via chrome.alarms (setInterval doesn't survive idle)
+chrome.alarms.create("prune-fetched-headers", { periodInMinutes: 1 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "prune-fetched-headers") {
+    const cutoff = Date.now() - 30000;
+    let changed = false;
+    for (const url of Object.keys(fetchedHeaders)) {
+      if (fetchedHeaders[url].timestamp < cutoff) {
+        delete fetchedHeaders[url];
+        changed = true;
+      }
     }
+    if (changed) saveFetchedHeaders();
   }
-}, 60000);
+});
 
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
@@ -45,20 +69,22 @@ chrome.webRequest.onHeadersReceived.addListener(
       } else {
         // Full response — store all headers
         // Preserve cookies from previous load if server didn't send new ones
-        // (servers skip Set-Cookie when browser already has the cookies)
         if (cookies.length === 0 && tabHeaders[details.tabId] && tabHeaders[details.tabId].cookies && tabHeaders[details.tabId].cookies.length > 0) {
           data.cookies = tabHeaders[details.tabId].cookies;
         }
         tabHeaders[details.tabId] = data;
       }
 
-      // Update badge (use whatever data we have for this tab)
+      // Update badge
       const grade = computeGrade(tabHeaders[details.tabId].headers);
-      chrome.browserAction.setBadgeText({ tabId: details.tabId, text: grade.letter });
-      chrome.browserAction.setBadgeBackgroundColor({ tabId: details.tabId, color: grade.color });
+      chrome.action.setBadgeText({ tabId: details.tabId, text: grade.letter });
+      chrome.action.setBadgeBackgroundColor({ tabId: details.tabId, color: grade.color });
+
+      saveTabHeaders();
     } else {
-      // Could be a fetch from this background page — store by URL
+      // Could be a fetch from this service worker — store by URL
       fetchedHeaders[details.url] = data;
+      saveFetchedHeaders();
     }
   },
   { urls: ["<all_urls>"] },
@@ -68,17 +94,16 @@ chrome.webRequest.onHeadersReceived.addListener(
 // Clean up when tabs close
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete tabHeaders[tabId];
+  saveTabHeaders();
 });
 
 // Scan a single tab: fetch its URL from the background to trigger webRequest
-// (which captures ALL headers including HSTS), then use that data.
-// Response headers are only used as a fallback since browsers hide HSTS from fetch().
 function scanTab(tab) {
   if (!tab.url || (!tab.url.startsWith("http://") && !tab.url.startsWith("https://"))) return;
   if (tabHeaders[tab.id]) return; // Already have data
 
   const url = tab.url;
-  delete fetchedHeaders[url]; // Clear stale data
+  delete fetchedHeaders[url];
 
   fetch(url, { credentials: "omit", cache: "no-store" })
     .then((response) => {
@@ -86,27 +111,21 @@ function scanTab(tab) {
 
       // Give webRequest listener time to store captured headers
       setTimeout(() => {
-        // Prefer webRequest data — it sees ALL headers including HSTS
-        // (browsers strip HSTS from fetch() Response objects)
         const webReqData = fetchedHeaders[url] || fetchedHeaders[finalUrl];
 
         let headers;
         if (webReqData && webReqData.headers) {
-          // Start with webRequest headers (includes HSTS)
           headers = { ...webReqData.headers };
-          // Fill in anything webRequest missed from the Response
           response.headers.forEach((value, name) => {
             if (!headers[name.toLowerCase()]) headers[name.toLowerCase()] = value;
           });
         } else {
-          // Fallback: Response headers only (no HSTS, but better than nothing)
           headers = {};
           response.headers.forEach((value, name) => {
             headers[name.toLowerCase()] = value;
           });
         }
 
-        // Carry over cookies from webRequest data if available
         const cookies = (webReqData && webReqData.cookies) ? webReqData.cookies : [];
 
         const data = {
@@ -118,10 +137,11 @@ function scanTab(tab) {
         };
 
         tabHeaders[tab.id] = data;
+        saveTabHeaders();
 
         const grade = computeGrade(headers);
-        chrome.browserAction.setBadgeText({ tabId: tab.id, text: grade.letter });
-        chrome.browserAction.setBadgeBackgroundColor({ tabId: tab.id, color: grade.color });
+        chrome.action.setBadgeText({ tabId: tab.id, text: grade.letter });
+        chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: grade.color });
       }, 150);
     })
     .catch(() => {});
@@ -163,30 +183,23 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest` });
   }
 });
+
 chrome.runtime.onStartup.addListener(scanAllTabs);
 
-// Check if captured data looks incomplete — missing headers that webRequest
-// should have seen. This triggers a supplementary fetch to fill gaps.
+// Check if captured data looks incomplete
 function needsSupplementaryFetch(tabId, url) {
   const data = tabHeaders[tabId];
-  // No data at all — definitely need to fetch
   if (!data || !data.headers) return true;
-  // For HTTPS sites, check if key security headers are suspiciously absent.
-  // HSTS is the most commonly missed header (stripped from cache/bfcache).
-  // If we have very few headers overall, the capture was likely incomplete.
   if (url.startsWith("https://")) {
     const h = data.headers;
     const headerCount = Object.keys(h).length;
-    // Very few headers suggests a cache hit with minimal data
     if (headerCount < 5) return true;
-    // HSTS is the header most often missed from cached responses
     if (!h["strict-transport-security"]) return true;
   }
   return false;
 }
 
 // Merge headers from a supplementary fetch into existing tab data.
-// Only adds missing headers — never overwrites what webRequest already captured.
 function mergeSupplementaryData(tabId, webReqData) {
   if (!webReqData || !webReqData.headers) return;
 
@@ -205,11 +218,11 @@ function mergeSupplementaryData(tabId, webReqData) {
     }
     if (changed) {
       const newGrade = computeGrade(existing.headers);
-      chrome.browserAction.setBadgeText({ tabId: tabId, text: newGrade.letter });
-      chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: newGrade.color });
+      chrome.action.setBadgeText({ tabId: tabId, text: newGrade.letter });
+      chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: newGrade.color });
+      saveTabHeaders();
     }
   } else {
-    // No existing data — use the fetch result directly
     tabHeaders[tabId] = {
       url: webReqData.url,
       statusCode: webReqData.statusCode,
@@ -218,21 +231,19 @@ function mergeSupplementaryData(tabId, webReqData) {
       timestamp: Date.now()
     };
     const newGrade = computeGrade(tabHeaders[tabId].headers);
-    chrome.browserAction.setBadgeText({ tabId: tabId, text: newGrade.letter });
-    chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: newGrade.color });
+    chrome.action.setBadgeText({ tabId: tabId, text: newGrade.letter });
+    chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: newGrade.color });
+    saveTabHeaders();
   }
 }
 
 // When a tab finishes loading, ensure the badge is set and headers are complete.
-// Chrome/Brave clears per-tab badges on navigation, so we must re-apply.
-// If key headers appear missing (e.g. HSTS from cached responses), do a
-// supplementary fetch to fill the gaps without fetching for every single tab.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     if (tabHeaders[tabId]) {
       const grade = computeGrade(tabHeaders[tabId].headers);
-      chrome.browserAction.setBadgeText({ tabId: tabId, text: grade.letter });
-      chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
+      chrome.action.setBadgeText({ tabId: tabId, text: grade.letter });
+      chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
     }
 
     if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://")) && needsSupplementaryFetch(tabId, tab.url)) {
@@ -243,7 +254,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         .then(() => {
           setTimeout(() => {
             const webReqData = fetchedHeaders[url];
-            // Also check final URL after redirects
             if (!webReqData) {
               for (const key of Object.keys(fetchedHeaders)) {
                 if (fetchedHeaders[key].timestamp > Date.now() - 5000) {
@@ -268,32 +278,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "fetchHeaders") {
-    // Do a fetch from the background page — this triggers webRequest
-    // which captures ALL headers including HSTS
     const url = message.url;
     const tabId = message.tabId;
-    delete fetchedHeaders[url]; // Clear any stale data
+    delete fetchedHeaders[url];
 
     fetch(url, { credentials: "omit", cache: "no-store" })
       .then((response) => {
         const finalUrl = response.url;
-        // Small delay to let webRequest listener finish storing
         setTimeout(() => {
-          // Check both original URL and final URL (after redirects)
           const result = fetchedHeaders[url] || fetchedHeaders[finalUrl] || null;
 
-          // Save to tabHeaders so data persists across reloads
           if (result && tabId) {
-            // Merge: keep existing cookies if the fresh fetch didn't capture new ones
             if ((!result.cookies || result.cookies.length === 0) && tabHeaders[tabId] && tabHeaders[tabId].cookies && tabHeaders[tabId].cookies.length > 0) {
               result.cookies = tabHeaders[tabId].cookies;
             }
             tabHeaders[tabId] = result;
+            saveTabHeaders();
 
-            // Update badge
             const grade = computeGrade(result.headers);
-            chrome.browserAction.setBadgeText({ tabId: tabId, text: grade.letter });
-            chrome.browserAction.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
+            chrome.action.setBadgeText({ tabId: tabId, text: grade.letter });
+            chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
           }
 
           sendResponse(result);
@@ -318,8 +322,6 @@ const SECURITY_HEADERS = [
 ];
 
 // Weighted scoring matching securityheaders.com methodology
-// Source: https://snyk.io/blog/website-security-score-explained/
-// and https://scotthelme.co.uk/scoring-transparency-on-securityheaders-io/
 const HEADER_WEIGHTS = {
   "content-security-policy":   25,
   "strict-transport-security": 25,
@@ -328,10 +330,9 @@ const HEADER_WEIGHTS = {
   "referrer-policy":           15,
   "permissions-policy":        15
 };
-const MAX_SCORE = 120; // sum of all weights
+const MAX_SCORE = 120;
 
 // CSP quality penalty — caps score if script-src has unsafe-inline/unsafe-eval
-// IMPORTANT: keep in sync with the identical function in popup.js
 function applyCSPPenalty(csp, score) {
   if (!csp) return score;
   const directives = {};
