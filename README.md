@@ -1,6 +1,6 @@
 # Security Headers Inspector
 
-A Chrome extension (Manifest V3) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/).
+A Chromium browser extension (Manifest V3) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/). Works on Chrome, Brave, Edge, Opera, and any Chromium-based browser.
 
 **Current Version:** 1.6.2
 
@@ -197,11 +197,15 @@ For extra privacy, you can set site access to "on click":
 
 ## Browser Compatibility
 
+Works on any Chromium-based browser that supports Manifest V3:
+
 | Browser | Status |
 |---------|--------|
-| **Chrome** | Fully supported (MV3) |
-| **Edge** | Fully supported (MV3) |
-| **Brave** | Not supported — Brave blocks `webRequest` in MV3 extensions |
+| **Chrome** | Fully supported |
+| **Brave** | Fully supported |
+| **Edge** | Fully supported |
+| **Opera** | Fully supported |
+| **Vivaldi** | Fully supported |
 
 ## Privacy
 
