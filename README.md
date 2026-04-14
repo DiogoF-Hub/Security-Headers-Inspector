@@ -2,7 +2,7 @@
 
 A Chromium browser extension (Manifest V3) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/). Works on Chrome, Brave, Edge, Opera, and any Chromium-based browser.
 
-**Current Version:** 1.6.2
+**Current Version:** 1.6.3
 
 ## What It Does
 
@@ -25,6 +25,7 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 - **Copy to clipboard** — one-click copy of all raw headers
 - **External scan shortcuts** — buttons and right-click menu to scan on SecurityHeaders.com and SSL Labs
 - **Internal page detection** — friendly message on `chrome://`, `about:`, extension pages, etc.
+- **Restricted page detection** — automatically detects pages that Chromium blocks extensions from inspecting, with a "Why?" explainer and external scan buttons
 
 ## Headers Evaluated
 
@@ -207,6 +208,23 @@ Works on any Chromium-based browser that supports Manifest V3:
 | **Opera** | Fully supported |
 | **Vivaldi** | Fully supported |
 
+## Restricted Pages
+
+Some pages cannot be scanned by any browser extension. Chromium has a hardcoded list of protected domains built into its source code — this applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.).
+
+On these pages, both the `webRequest` API (which captures headers during navigation) and `fetch` requests from extensions are blocked at the browser level before any network request is made. This is not caused by any HTTP header or server configuration — it is a security boundary enforced by the browser itself.
+
+When the extension detects a restricted page, it shows:
+- A clear message explaining why the page cannot be scanned
+- A **"Why?"** dropdown with a detailed explanation
+- **SecurityHeaders.com** and **SSL Labs** buttons so you can scan the page using an external service instead
+
+External scanners work because they make requests from their own servers, outside of the browser sandbox.
+
+**Known restricted pages include:**
+- Chrome Web Store (`chromewebstore.google.com`)
+- Other browser-vendor protected domains
+
 ## Privacy
 
 All analysis runs locally in your browser. No data is sent to any server. The extension only reads HTTP response headers from pages you visit — it does not modify any page content or inject scripts.
@@ -215,6 +233,7 @@ All analysis runs locally in your browser. No data is sent to any server. The ex
 
 | Version | Change |
 |---------|--------|
+| **1.6.3** | Restricted page detection with "Why?" explainer and external scan buttons; grade colors matched to securityheaders.com; performance throttling for bulk tab scanning; rescan merge fix |
 | **1.6.2** | Migrated to Manifest V3 (service worker, chrome.storage.session, chrome.alarms); code quality refactor |
 | **1.6.1** | Fix intermittent missing headers — supplementary background fetch merges missing headers on every page load |
 | **1.6.0** | Cookie values blurred for privacy (click to reveal); grade impact badges on all header cards |
