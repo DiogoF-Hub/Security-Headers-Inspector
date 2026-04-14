@@ -16,12 +16,30 @@ chrome.storage.session.get(["tabHeaders", "fetchedHeaders"], (result) => {
   if (result.fetchedHeaders) fetchedHeaders = result.fetchedHeaders;
 });
 
+// Debounce storage writes — many tabs completing at once would otherwise
+// serialize the entire object dozens of times per second.
+let saveTabHeadersTimer = null;
 function saveTabHeaders() {
+  if (saveTabHeadersTimer) clearTimeout(saveTabHeadersTimer);
+  saveTabHeadersTimer = setTimeout(() => {
+    chrome.storage.session.set({ tabHeaders });
+    saveTabHeadersTimer = null;
+  }, 300);
+}
+
+function saveTabHeadersNow() {
+  if (saveTabHeadersTimer) clearTimeout(saveTabHeadersTimer);
+  saveTabHeadersTimer = null;
   chrome.storage.session.set({ tabHeaders });
 }
 
+let saveFetchedHeadersTimer = null;
 function saveFetchedHeaders() {
-  chrome.storage.session.set({ fetchedHeaders });
+  if (saveFetchedHeadersTimer) clearTimeout(saveFetchedHeadersTimer);
+  saveFetchedHeadersTimer = setTimeout(() => {
+    chrome.storage.session.set({ fetchedHeaders });
+    saveFetchedHeadersTimer = null;
+  }, 300);
 }
 
 // Prune stale fetchedHeaders entries via chrome.alarms (setInterval doesn't survive idle)
@@ -144,15 +162,35 @@ function scanTab(tab) {
         chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: grade.color });
       }, 150);
     })
-    .catch(() => {});
+    .catch(() => {
+      // Fetch blocked (CORS, restricted domain, etc.) — mark tab so popup can show why
+      if (!tabHeaders[tab.id]) {
+        tabHeaders[tab.id] = { restricted: true, url: url, timestamp: Date.now() };
+        saveTabHeaders();
+      }
+    });
 }
 
-// On startup / install, scan all existing tabs so badges show immediately
+// On startup / install, scan all existing tabs in batches to avoid flooding
+const SCAN_BATCH_SIZE = 3;
+const SCAN_BATCH_DELAY = 500; // ms between batches
+
 function scanAllTabs() {
   chrome.tabs.query({}, (tabs) => {
-    for (const tab of tabs) {
-      scanTab(tab);
+    const queue = tabs.filter(tab =>
+      tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://")) && !tabHeaders[tab.id]
+    );
+
+    function processNext(i) {
+      if (i >= queue.length) return;
+      const batch = queue.slice(i, i + SCAN_BATCH_SIZE);
+      for (const tab of batch) {
+        scanTab(tab);
+      }
+      setTimeout(() => processNext(i + SCAN_BATCH_SIZE), SCAN_BATCH_DELAY);
     }
+
+    processNext(0);
   });
 }
 
@@ -189,6 +227,7 @@ chrome.runtime.onStartup.addListener(scanAllTabs);
 // Check if captured data looks incomplete
 function needsSupplementaryFetch(tabId, url) {
   const data = tabHeaders[tabId];
+  if (data && data.restricted) return false; // Already tried and failed
   if (!data || !data.headers) return true;
   if (url.startsWith("https://")) {
     const h = data.headers;
@@ -237,6 +276,52 @@ function mergeSupplementaryData(tabId, webReqData) {
   }
 }
 
+// Throttle supplementary fetches from tabs.onUpdated — queue them so only
+// a few run at a time when many tabs finish loading at once.
+const supplementaryQueue = [];
+let activeFetches = 0;
+const MAX_CONCURRENT_FETCHES = 2;
+
+function enqueueSupplementaryFetch(tabId, url) {
+  supplementaryQueue.push({ tabId, url });
+  drainSupplementaryQueue();
+}
+
+function drainSupplementaryQueue() {
+  while (activeFetches < MAX_CONCURRENT_FETCHES && supplementaryQueue.length > 0) {
+    const { tabId, url } = supplementaryQueue.shift();
+    activeFetches++;
+    delete fetchedHeaders[url];
+
+    fetch(url, { credentials: "omit", cache: "no-store" })
+      .then(() => {
+        setTimeout(() => {
+          const webReqData = fetchedHeaders[url];
+          if (!webReqData) {
+            for (const key of Object.keys(fetchedHeaders)) {
+              if (fetchedHeaders[key].timestamp > Date.now() - 5000) {
+                mergeSupplementaryData(tabId, fetchedHeaders[key]);
+                return;
+              }
+            }
+            return;
+          }
+          mergeSupplementaryData(tabId, webReqData);
+        }, 150);
+      })
+      .catch(() => {
+        if (!tabHeaders[tabId] || !tabHeaders[tabId].headers) {
+          tabHeaders[tabId] = { restricted: true, url: url, timestamp: Date.now() };
+          saveTabHeaders();
+        }
+      })
+      .finally(() => {
+        activeFetches--;
+        drainSupplementaryQueue();
+      });
+  }
+}
+
 // When a tab finishes loading, ensure the badge is set and headers are complete.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
@@ -247,26 +332,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     }
 
     if (tab.url && (tab.url.startsWith("http://") || tab.url.startsWith("https://")) && needsSupplementaryFetch(tabId, tab.url)) {
-      const url = tab.url;
-      delete fetchedHeaders[url];
-
-      fetch(url, { credentials: "omit", cache: "no-store" })
-        .then(() => {
-          setTimeout(() => {
-            const webReqData = fetchedHeaders[url];
-            if (!webReqData) {
-              for (const key of Object.keys(fetchedHeaders)) {
-                if (fetchedHeaders[key].timestamp > Date.now() - 5000) {
-                  mergeSupplementaryData(tabId, fetchedHeaders[key]);
-                  return;
-                }
-              }
-              return;
-            }
-            mergeSupplementaryData(tabId, webReqData);
-          }, 150);
-        })
-        .catch(() => {});
+      enqueueSupplementaryFetch(tabId, tab.url);
     }
   }
 });
@@ -288,23 +354,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         setTimeout(() => {
           const result = fetchedHeaders[url] || fetchedHeaders[finalUrl] || null;
 
-          if (result && tabId) {
-            if ((!result.cookies || result.cookies.length === 0) && tabHeaders[tabId] && tabHeaders[tabId].cookies && tabHeaders[tabId].cookies.length > 0) {
-              result.cookies = tabHeaders[tabId].cookies;
+          if (result && result.headers && tabId) {
+            const existing = tabHeaders[tabId];
+            if (existing && existing.headers) {
+              // Merge: new headers win, but keep any existing ones the new fetch missed
+              const merged = { ...existing.headers, ...result.headers };
+              result.headers = merged;
+              if ((!result.cookies || result.cookies.length === 0) && existing.cookies && existing.cookies.length > 0) {
+                result.cookies = existing.cookies;
+              }
             }
             tabHeaders[tabId] = result;
-            saveTabHeaders();
+            saveTabHeadersNow();
 
             const grade = computeGrade(result.headers);
             chrome.action.setBadgeText({ tabId: tabId, text: grade.letter });
             chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
           }
 
-          sendResponse(result);
+          sendResponse(result || tabHeaders[tabId] || null);
         }, 150);
       })
       .catch(() => {
-        sendResponse(null);
+        const restricted = { restricted: true, url: url, timestamp: Date.now() };
+        if (tabId) {
+          tabHeaders[tabId] = restricted;
+          saveTabHeaders();
+        }
+        sendResponse(restricted);
       });
 
     return true; // Keep channel open for async response
@@ -376,19 +453,19 @@ function computeGrade(headers) {
   let letter, color;
 
   if (pct >= 95) {
-    letter = "A+"; color = "#2ecc40";
+    letter = "A+"; color = "#4ec83d";
   } else if (pct >= 75) {
-    letter = "A"; color = "#2ecc40";
+    letter = "A"; color = "#41a832";
   } else if (pct >= 60) {
-    letter = "B"; color = "#99cc00";
+    letter = "B"; color = "#ffd242";
   } else if (pct >= 50) {
-    letter = "C"; color = "#ffdc00";
+    letter = "C"; color = "#ffd242";
   } else if (pct >= 15) {
-    letter = "D"; color = "#ff851b";
+    letter = "D"; color = "#ffa500";
   } else if (pct >= 5) {
-    letter = "E"; color = "#ff4136";
+    letter = "E"; color = "#ffa500";
   } else {
-    letter = "F"; color = "#cc0000";
+    letter = "F"; color = "#ff0000";
   }
 
   return { letter, color, present, total, score, pct };

@@ -1046,11 +1046,136 @@ body.light .header-item.warn .desc-verdict {
   line-height: 1.5;
 }
 
+/* Restricted page state */
+#restricted-page {
+  padding: 24px 20px;
+  text-align: center;
+}
+
+#restricted-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+.restricted-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+#restricted-url {
+  font-size: 12px;
+  color: var(--text-dim);
+  word-break: break-all;
+  margin-bottom: 8px;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+}
+
+.restricted-summary {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+#restricted-why-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  margin-bottom: 4px;
+}
+
+#restricted-why-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+#restricted-why-toggle .arrow {
+  font-size: 10px;
+  transition: transform 0.2s;
+}
+
+#restricted-why-toggle.expanded .arrow {
+  transform: rotate(180deg);
+}
+
+.restricted-why-content {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.25s ease;
+  text-align: left;
+  margin: 0 4px;
+}
+
+.restricted-why-content.show {
+  max-height: 500px;
+  opacity: 1;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.restricted-why-content p {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0 0 8px 0;
+}
+
+.restricted-why-content p:last-child {
+  margin-bottom: 0;
+}
+
+.restricted-why-content strong {
+  color: var(--text-secondary);
+}
+
+#restricted-scans {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+  margin-top: 14px;
+}
+
+#restricted-scans button {
+  flex: 1;
+  padding: 8px 10px;
+  background: var(--bg-accent);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#restricted-scans button:hover {
+  background: var(--bg-btn-hover);
+  color: var(--text-primary);
+}
+
+#restricted-scans .scan-icon {
+  font-size: 12px;
+}
+
 /* Grade colors */
-.grade-aplus { background: #2ecc40 !important; }
-.grade-a { background: #2ecc40 !important; }
-.grade-b { background: #99cc00 !important; }
-.grade-c { background: #ffdc00 !important; color: var(--grade-c-text) !important; }
-.grade-d { background: #ff851b !important; }
-.grade-e { background: #ff4136 !important; }
-.grade-f { background: #cc0000 !important; }
+.grade-aplus { background: #4ec83d !important; }
+.grade-a { background: #41a832 !important; }
+.grade-b { background: #ffd242 !important; color: var(--grade-c-text) !important; }
+.grade-c { background: #ffd242 !important; color: var(--grade-c-text) !important; }
+.grade-d { background: orange !important; }
+.grade-e { background: orange !important; }
+.grade-f { background: red !important; }

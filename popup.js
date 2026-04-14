@@ -472,6 +472,7 @@ function render(data) {
   toggleBtn.style.display = "";
   document.getElementById("external-scans").style.display = "";
   document.getElementById("internal-page").classList.add("hidden");
+  document.getElementById("restricted-page").classList.add("hidden");
 
   // Reset expandable sections to collapsed
   document.getElementById("details").classList.remove("show");
@@ -922,6 +923,29 @@ document.getElementById("scan-ssllabs").addEventListener("click", () => {
   });
 });
 
+// Restricted page — "Why?" toggle
+document.getElementById("restricted-why-toggle").addEventListener("click", () => {
+  const btn = document.getElementById("restricted-why-toggle");
+  const content = document.getElementById("restricted-why");
+  btn.classList.toggle("expanded");
+  content.classList.toggle("show");
+});
+
+// Restricted page — scan buttons
+document.getElementById("restricted-scan-secheaders").addEventListener("click", () => {
+  const url = document.getElementById("restricted-page").dataset.url;
+  if (url) chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(url)}&hide=on&followRedirects=on`, active: false });
+});
+
+document.getElementById("restricted-scan-ssllabs").addEventListener("click", () => {
+  const url = document.getElementById("restricted-page").dataset.url;
+  if (url) {
+    let hostname;
+    try { hostname = new URL(url).hostname; } catch { return; }
+    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest`, active: false });
+  }
+});
+
 function renderInternalPage(url) {
   document.getElementById("header").style.display = "none";
   document.getElementById("quick-status").style.display = "none";
@@ -930,8 +954,28 @@ function renderInternalPage(url) {
 
   const el = document.getElementById("internal-page");
   el.classList.remove("hidden");
+  el.querySelector(".internal-title").textContent = "Internal Page";
+  el.querySelector(".hint").textContent = "Not a website — security headers don't apply here.";
 
   document.getElementById("internal-scheme").textContent = (url || "").split(/[?#]/)[0].substring(0, 60) + ((url || "").length > 60 ? "..." : "");
+}
+
+function renderRestrictedPage(url) {
+  document.getElementById("header").style.display = "none";
+  document.getElementById("quick-status").style.display = "none";
+  document.getElementById("toggle-details").style.display = "none";
+  document.getElementById("external-scans").style.display = "none";
+  document.getElementById("no-data").classList.add("hidden");
+  document.getElementById("internal-page").classList.add("hidden");
+
+  const el = document.getElementById("restricted-page");
+  el.classList.remove("hidden");
+
+  const truncated = (url || "").split(/[?#]/)[0].substring(0, 60) + ((url || "").length > 60 ? "..." : "");
+  document.getElementById("restricted-url").textContent = truncated;
+
+  // Store URL for scan buttons
+  el.dataset.url = url || "";
 }
 
 // Scan the active tab: try cached headers first, fall back to background fetch
@@ -959,15 +1003,25 @@ function scanActiveTab(forceRefresh = false) {
     if (forceRefresh) {
       // Skip cache — always do a fresh fetch via background
       const data = await fetchHeadersViaBackground(url, tab.id);
-      render(data);
+      if (data && data.restricted) {
+        renderRestrictedPage(url);
+      } else {
+        render(data);
+      }
     } else {
       // Try cached headers first
       chrome.runtime.sendMessage({ type: "getHeaders", tabId: tab.id }, async (response) => {
-        if (response && response.headers && Object.keys(response.headers).length > 0) {
+        if (response && response.restricted) {
+          renderRestrictedPage(url);
+        } else if (response && response.headers && Object.keys(response.headers).length > 0) {
           render(response);
         } else {
           const data = await fetchHeadersViaBackground(url, tab.id);
-          render(data);
+          if (data && data.restricted) {
+            renderRestrictedPage(url);
+          } else {
+            render(data);
+          }
         }
       });
     }

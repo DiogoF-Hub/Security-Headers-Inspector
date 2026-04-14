@@ -90,6 +90,29 @@
       <p id="internal-scheme"></p>
       <p class="hint">Not a website — security headers don't apply here.</p>
     </div>
+
+    <!-- Restricted page state -->
+    <div id="restricted-page" class="hidden">
+      <div id="restricted-icon">&#128683;</div>
+      <p class="restricted-title">Restricted Page</p>
+      <p id="restricted-url"></p>
+      <p class="restricted-summary">This page cannot be scanned by browser extensions.</p>
+      <button id="restricted-why-toggle">Why? <span class="arrow">&#9660;</span></button>
+      <div id="restricted-why" class="restricted-why-content">
+        <p>Chromium has a hardcoded list of protected domains built into its source code. This applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.). Extensions are blocked before any request is even made — this is a browser-level security boundary, not a server-side decision.</p>
+        <p>Both the <strong>webRequest API</strong> (which captures headers during navigation) and <strong>fetch requests</strong> from extensions are rejected by Chrome on these domains.</p>
+        <p>This is a browser-level restriction — no extension can bypass it.</p>
+        <p>External scanners like SecurityHeaders.com work because they make the request from their own servers, outside of the browser sandbox.</p>
+      </div>
+      <div id="restricted-scans">
+        <button id="restricted-scan-secheaders" title="Scan on securityheaders.com">
+          <span class="scan-icon">&#9881;</span> SecurityHeaders.com
+        </button>
+        <button id="restricted-scan-ssllabs" title="Scan on SSL Labs">
+          <span class="scan-icon">&#128274;</span> SSL Labs
+        </button>
+      </div>
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>
