@@ -322,10 +322,21 @@ function drainSupplementaryQueue() {
   }
 }
 
-// When a tab finishes loading, ensure the badge is set and headers are complete.
+// When a tab's URL changes, clear stale headers from the previous page.
+// Without this, navigating from an intermediate page (e.g. Teams redirect)
+// to a restricted page (e.g. Chrome Web Store) would show the old headers.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url) {
+    const old = tabHeaders[tabId];
+    if (old && old.url && old.url !== changeInfo.url) {
+      delete tabHeaders[tabId];
+      chrome.action.setBadgeText({ tabId: tabId, text: "" });
+      saveTabHeaders();
+    }
+  }
+
   if (changeInfo.status === "complete") {
-    if (tabHeaders[tabId]) {
+    if (tabHeaders[tabId] && tabHeaders[tabId].headers) {
       const grade = computeGrade(tabHeaders[tabId].headers);
       chrome.action.setBadgeText({ tabId: tabId, text: grade.letter });
       chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: grade.color });
