@@ -52,6 +52,8 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 | **X-XSS-Protection** | Legacy XSS auditor (should be `0` — rely on CSP instead) |
 | **X-Robots-Tag** | Controls search engine indexing at the HTTP level |
 | **Alt-Svc** | Advertises HTTP/3 (QUIC) support for faster, encrypted connections |
+| **NEL** | Network Error Logging — collects reports on DNS, TLS, and connection failures |
+| **Report-To** | Enables the Reporting API to collect browser error and CSP violation reports |
 
 ### Information Disclosure Headers (flagged when present)
 

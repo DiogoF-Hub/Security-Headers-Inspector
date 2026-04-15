@@ -226,6 +226,26 @@ const ADDITIONAL_HEADERS = {
         return { status: "good", msg: "HTTP/3 (QUIC) is available — faster, more reliable connections with built-in TLS 1.3 encryption." };
       return { status: "info", msg: `Alternative service advertised: "${val.trim()}".` };
     }
+  },
+  "nel": {
+    label: "NEL",
+    about: "Network Error Logging (NEL) instructs the browser to send reports during various network or application errors. It collects information about failed connections, DNS resolution errors, TLS negotiation failures, and other network-level issues that happen before your server even sees the request.",
+    good: "NEL gives you visibility into network errors your users experience that traditional server-side logging cannot capture — such as DNS failures, TCP timeouts, and TLS errors. This helps diagnose connectivity issues affecting real users.",
+    recommendation: "Configure a NEL policy with a JSON value specifying <code>report_to</code> group, <code>max_age</code>, and optionally <code>failure_fraction</code> to sample errors. Pair with the <code>Report-To</code> header to define where reports are sent. Services like Report URI can collect these reports for free.",
+    evaluate: (val) => {
+      if (!val) return { status: "info", msg: "Not set — the site is not collecting network error reports. Consider enabling NEL to detect DNS, TLS, and connection failures affecting users." };
+      return { status: "good", msg: "Network Error Logging is configured — the browser will report network-level errors to help diagnose connectivity issues." };
+    }
+  },
+  "report-to": {
+    label: "Report-To",
+    about: "The Report-To header enables the Reporting API, which allows a website to collect reports from the browser about various errors that may occur — including Content Security Policy violations, deprecations, browser interventions, network errors, and crash reports.",
+    good: "Having the Reporting API configured means you are actively collecting data about issues your users encounter. This helps you detect CSP violations, deprecated API usage, and other problems in production without relying on users to report them.",
+    recommendation: "Configure a reporting endpoint using <code>Report-To</code> with a JSON value specifying group name, max age, and endpoint URLs. Pair with CSP's <code>report-to</code> directive to collect violation reports. Services like Report URI can collect these reports for free.",
+    evaluate: (val) => {
+      if (!val) return { status: "info", msg: "Not set — the site is not collecting browser reports. Consider enabling the Reporting API to monitor CSP violations and other errors in production." };
+      return { status: "good", msg: "Reporting API is configured — the site collects browser reports for errors, CSP violations, and deprecations." };
+    }
   }
 };
 
@@ -761,6 +781,8 @@ const GOOD_TOKENS = {
   "permissions-policy": [/[a-z-]+=\(\)/g],
   "alt-svc": [/h3(?:=[^,;]*)?/g],
   "x-robots-tag": [/\bnoindex\b/gi, /\bnofollow\b/gi, /\bnone\b/gi, /\bnoarchive\b/gi, /\bnosnippet\b/gi],
+  "nel": [/\breport_to\b/g, /\bmax_age\b/g, /\bfailure_fraction\b/g, /\bsuccess_fraction\b/g],
+  "report-to": [/\bendpoints\b/g, /\bgroup\b/g, /\bmax_age\b/g],
 };
 
 function highlightGoodTokens(headerName, value) {
