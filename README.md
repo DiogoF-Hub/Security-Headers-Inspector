@@ -123,7 +123,7 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 │         │                                               │
 │         ▼                                               │
 │  webRequest.onHeadersReceived (read-only observation)   │
-│  (background.js, MV3 service worker)                     │
+│  (background.js, MV3 service worker)                    │
 │         │                                               │
 │         ├── Captures ALL response headers (incl. HSTS)  │
 │         ├── Stores in chrome.storage.session by tab ID  │
