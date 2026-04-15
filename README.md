@@ -1,6 +1,6 @@
 # Security Headers Inspector
 
-A Chromium browser extension (Manifest V3) that instantly checks the security headers of any website you visit — inspired by [securityheaders.com](https://securityheaders.com/). Works on Chrome, Brave, Edge, Opera, and any Chromium-based browser.
+A Chromium browser extension (Manifest V3) that checks the security headers of any website you visit. Inspired by [securityheaders.com](https://securityheaders.com/). Works on Chrome, Brave, Edge, Opera, and any Chromium-based browser.
 
 **Current Version:** 1.6.3
 
@@ -10,22 +10,22 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 
 - **Letter grade** with weighted scoring matching securityheaders.com methodology
 - **Score percentage** showing how the grade was calculated
-- **Quick status pills** — at-a-glance view of which core headers are present or missing
+- **Quick status pills** for an at-a-glance view of which core headers are present or missing
 - **Detailed expandable cards** for each header with:
   - Current value (or "Not set")
   - Color-coded verdict (good / warn / bad)
-  - "What is this?" — plain-English explanation
-  - "Why it matters" — security implications
-  - "Recommendation" — what value to set
-- **Deep CSP analysis** — flags wildcards, `data:` URIs, `http:` sources, missing `default-src`/`object-src`/`base-uri`, and correctly handles `strict-dynamic`/nonce/hash negation of `unsafe-inline`
-- **Cookie security analysis** — checks each `Set-Cookie` for `Secure`, `HttpOnly`, `SameSite`, and `__Secure-`/`__Host-` prefix
-- **Information disclosure detection** — flags headers leaking server versions, frameworks, or debug info
-- **Deprecated header detection** — identifies headers that are no longer useful (Expect-CT, HPKP, etc.)
-- **Color-coded raw headers** — security headers in green, info disclosure in amber, deprecated in purple, with good security tokens highlighted in bold
-- **Copy to clipboard** — one-click copy of all raw headers
-- **External scan shortcuts** — buttons and right-click menu to scan on SecurityHeaders.com and SSL Labs
-- **Internal page detection** — friendly message on `chrome://`, `about:`, extension pages, etc.
-- **Restricted page detection** — automatically detects pages that Chromium blocks extensions from inspecting, with a "Why?" explainer and external scan buttons
+  - "What is this?" plain-English explanation
+  - "Why it matters" security implications
+  - "Recommendation" what value to set
+- **Deep CSP analysis** that flags wildcards, `data:` URIs, `http:` sources, missing `default-src`/`object-src`/`base-uri`, and correctly handles `strict-dynamic`/nonce/hash negation of `unsafe-inline`
+- **Cookie security analysis** checking each `Set-Cookie` for `Secure`, `HttpOnly`, `SameSite`, and `__Secure-`/`__Host-` prefix
+- **Information disclosure detection** flagging headers that leak server versions, frameworks, or debug info
+- **Deprecated header detection** identifying headers that are no longer useful (Expect-CT, HPKP, etc.)
+- **Color-coded raw headers** with security headers in green, info disclosure in amber, deprecated in purple, and good security tokens highlighted in bold
+- **Copy to clipboard** for one-click copy of all raw headers
+- **External scan shortcuts** with buttons and right-click menu to scan on SecurityHeaders.com and SSL Labs
+- **Internal page detection** showing a friendly message on `chrome://`, `about:`, extension pages, etc.
+- **Restricted page detection** that automatically detects pages Chromium blocks extensions from inspecting, with a "Why?" explainer and external scan buttons
 
 ## Headers Evaluated
 
@@ -49,10 +49,10 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 | **Cross-Origin-Opener-Policy** | Isolates browsing context from cross-origin windows |
 | **Cross-Origin-Resource-Policy** | Controls who can load your resources |
 | **Cross-Origin-Embedder-Policy** | Requires explicit permission for cross-origin resource loading |
-| **X-XSS-Protection** | Legacy XSS auditor (should be `0` — rely on CSP instead) |
+| **X-XSS-Protection** | Legacy XSS auditor (should be `0`, rely on CSP instead) |
 | **X-Robots-Tag** | Controls search engine indexing at the HTTP level |
 | **Alt-Svc** | Advertises HTTP/3 (QUIC) support for faster, encrypted connections |
-| **NEL** | Network Error Logging — collects reports on DNS, TLS, and connection failures |
+| **NEL** | Network Error Logging, collects reports on DNS, TLS, and connection failures |
 | **Report-To** | Enables the Reporting API to collect browser error and CSP violation reports |
 
 ### Information Disclosure Headers (flagged when present)
@@ -65,7 +65,7 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 | **X-AspNetMvc-Version** | Exposes ASP.NET MVC version |
 | **X-Generator** | Reveals CMS or site generator |
 | **Via** | Leaks proxy/gateway infrastructure details |
-| **X-Debug-Token / X-Debug-Token-Link** | Exposes debug profiler — critical in production |
+| **X-Debug-Token / X-Debug-Token-Link** | Exposes debug profiler, critical in production |
 
 ### Deprecated Headers (flagged when present)
 
@@ -101,7 +101,7 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 | Permissions-Policy | 15 |
 | **Total** | **120** |
 
-**CSP quality penalties:** If `script-src` contains `unsafe-inline` (without `strict-dynamic`/nonce/hash to negate it) or `unsafe-eval`, the effective score is capped at 82% — preventing an A+ grade even with all headers present.
+**CSP quality penalties:** If `script-src` contains `unsafe-inline` (without `strict-dynamic`/nonce/hash to negate it) or `unsafe-eval`, the effective score is capped at 82%, preventing an A+ grade even with all headers present.
 
 | Grade | Score % |
 |-------|---------|
@@ -123,7 +123,7 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 │         │                                               │
 │         ▼                                               │
 │  webRequest.onHeadersReceived (read-only observation)   │
-│  (background.js — MV3 service worker)                   │
+│  (background.js, MV3 service worker)                     │
 │         │                                               │
 │         ├── Captures ALL response headers (incl. HSTS)  │
 │         ├── Stores in chrome.storage.session by tab ID  │
@@ -143,7 +143,7 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 └─────────────────────────────────────────────────────────┘
 ```
 
-1. **Service worker** (`background.js`) — MV3 background script:
+1. **Service worker** (`background.js`), the MV3 background script:
    - Listens to `webRequest.onHeadersReceived` with `extraHeaders` on every request
    - Captures ALL response headers (including HSTS and Set-Cookie) and stores them via `chrome.storage.session`
    - Keeps a local in-memory cache synced to storage for fast access
@@ -155,7 +155,7 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
    - Provides right-click context menu for external scans
    - Uses `chrome.alarms` for periodic cleanup (service worker timers don't persist)
 
-2. **Popup** (`popup.html`, `popup.css`, `popup.js`) — the UI:
+2. **Popup** (`popup.html`, `popup.css`, `popup.js`), the UI:
    - Requests cached headers from background, falls back to fresh fetch if needed
    - Evaluates each header with detailed analysis (CSP directive parsing, cookie flag checking, etc.)
    - Renders grade, pills, expandable detail cards, cookie analysis, disclosure/deprecated warnings
@@ -190,7 +190,7 @@ Security-Headers-Inspector/
 2. Enable **Developer mode** (top right toggle)
 3. Click **Load unpacked**
 4. Select the extension folder
-5. Visit any website — the badge shows the grade instantly, click for the full report
+5. Visit any website, the badge shows the grade instantly. Click for the full report
 
 ### Optional: Restrict Site Access
 
@@ -212,9 +212,9 @@ Works on any Chromium-based browser that supports Manifest V3:
 
 ## Restricted Pages
 
-Some pages cannot be scanned by any browser extension. Chromium has a hardcoded list of protected domains built into its source code — this applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.).
+Some pages cannot be scanned by any browser extension. Chromium has a hardcoded list of protected domains built into its source code, and this applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.).
 
-On these pages, both the `webRequest` API (which captures headers during navigation) and `fetch` requests from extensions are blocked at the browser level before any network request is made. This is not caused by any HTTP header or server configuration — it is a security boundary enforced by the browser itself.
+On these pages, both the `webRequest` API (which captures headers during navigation) and `fetch` requests from extensions are blocked at the browser level before any network request is made. This is not caused by any HTTP header or server configuration. It's a security boundary enforced by the browser itself.
 
 When the extension detects a restricted page, it shows:
 - A clear message explaining why the page cannot be scanned
@@ -229,7 +229,7 @@ External scanners work because they make requests from their own servers, outsid
 
 ## Privacy
 
-All analysis runs locally in your browser. No data is sent to any server. The extension only reads HTTP response headers from pages you visit — it does not modify any page content or inject scripts.
+All analysis runs locally in your browser. No data is sent to any server. The extension only reads HTTP response headers from pages you visit. It does not modify any page content or inject scripts.
 
 ## Changelog
 
@@ -237,7 +237,7 @@ All analysis runs locally in your browser. No data is sent to any server. The ex
 |---------|--------|
 | **1.6.3** | Restricted page detection with "Why?" explainer and external scan buttons; grade colors matched to securityheaders.com; performance throttling for bulk tab scanning; rescan merge fix |
 | **1.6.2** | Migrated to Manifest V3 (service worker, chrome.storage.session, chrome.alarms); code quality refactor |
-| **1.6.1** | Fix intermittent missing headers — supplementary background fetch merges missing headers on every page load |
+| **1.6.1** | Fix intermittent missing headers. Supplementary background fetch now merges missing headers on every page load |
 | **1.6.0** | Cookie values blurred for privacy (click to reveal); grade impact badges on all header cards |
 | **1.5.5** | X-Robots-Tag detection in Additional Headers section |
 | **1.5.4** | Alt-Svc header detection for HTTP/3 (QUIC) availability |
