@@ -976,8 +976,19 @@ function renderInternalPage(url) {
 
   const el = document.getElementById("internal-page");
   el.classList.remove("hidden");
-  el.querySelector(".internal-title").textContent = "Internal Page";
-  el.querySelector(".hint").textContent = "Not a website — security headers don't apply here.";
+
+  const isOwnWelcome = (url || "").startsWith(chrome.runtime.getURL("welcome.html"));
+  const iconEl = document.getElementById("internal-icon");
+
+  if (isOwnWelcome) {
+    iconEl.innerHTML = "&#128075;";
+    el.querySelector(".internal-title").textContent = "Hey, you found me!";
+    el.querySelector(".hint").innerHTML = "Trying to scan my own welcome page? Cheeky. &#128521;<br>Go visit a real website — I promise the headers there are more interesting.";
+  } else {
+    iconEl.innerHTML = "&#128274;";
+    el.querySelector(".internal-title").textContent = "Internal Page";
+    el.querySelector(".hint").textContent = "Not a website — security headers don't apply here.";
+  }
 
   document.getElementById("internal-scheme").textContent = (url || "").split(/[?#]/)[0].substring(0, 60) + ((url || "").length > 60 ? "..." : "");
 }
@@ -1048,6 +1059,13 @@ function scanActiveTab(forceRefresh = false) {
       });
     }
   });
+}
+
+// Show extension version in the footer
+const versionTag = document.getElementById("version-tag");
+if (versionTag) {
+  const manifest = chrome.runtime.getManifest();
+  versionTag.textContent = `v${manifest.version}`;
 }
 
 // Rescan button

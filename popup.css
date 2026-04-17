@@ -1179,3 +1179,13 @@ body.light .header-item.warn .desc-verdict {
 .grade-d { background: orange !important; }
 .grade-e { background: orange !important; }
 .grade-f { background: red !important; }
+
+#version-tag {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  align-self: flex-start;
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}

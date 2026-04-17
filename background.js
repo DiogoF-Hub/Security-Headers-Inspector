@@ -194,8 +194,12 @@ function scanAllTabs() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   scanAllTabs();
+
+  if (details.reason === "install") {
+    chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+  }
 
   // Create right-click context menu items
   chrome.contextMenus.create({
