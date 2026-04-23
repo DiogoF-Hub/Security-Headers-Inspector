@@ -2,7 +2,7 @@
 
 A Chromium browser extension (Manifest V3) that checks the security headers of any website you visit. Inspired by [securityheaders.com](https://securityheaders.com/). Works on Chrome, Brave, Edge, Opera, and any Chromium-based browser.
 
-**Current Version:** 1.6.4
+**Current Version:** 1.6.5
 
 ## What It Does
 
@@ -235,6 +235,7 @@ All analysis runs locally in your browser. No data is sent to any server. The ex
 
 | Version | Change |
 |---------|--------|
+| **1.6.5** | Security fix: escape response header values before rendering in the popup to prevent HTML injection from malicious sites |
 | **1.6.4** | Welcome page on first install with quick-start guide and Incognito tip; version tag in popup header; NEL and Report-To header analysis; fixed stale headers persisting across navigations |
 | **1.6.3** | Restricted page detection with "Why?" explainer and external scan buttons; grade colors matched to securityheaders.com; performance throttling for bulk tab scanning; rescan merge fix |
 | **1.6.2** | Migrated to Manifest V3 (service worker, chrome.storage.session, chrome.alarms); code quality refactor |
