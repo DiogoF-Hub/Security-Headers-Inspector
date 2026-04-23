@@ -66,7 +66,7 @@ const SECURITY_HEADERS = {
         .filter(([k, v]) => k !== "script-src" && v.includes("*"))
         .map(([k]) => k);
       if (wildcardDirs.length > 0)
-        warnings.push(`Wildcard <code>*</code> found in: ${wildcardDirs.map(d => `<code>${d}</code>`).join(", ")}.`);
+        warnings.push(`Wildcard <code>*</code> found in: ${wildcardDirs.map(d => `<code>${escapeHtml(d)}</code>`).join(", ")}.`);
 
       if (warnings.length === 0)
         return { status: "good", msg: "Well configured — approved content sources are whitelisted." };
@@ -93,8 +93,8 @@ const SECURITY_HEADERS = {
       if (!val) return { status: "bad", msg: "Missing — full referrer URLs (including paths and query strings) may leak to external sites." };
       const strong = ["no-referrer", "same-origin", "strict-origin", "strict-origin-when-cross-origin"];
       if (strong.includes(val.trim().toLowerCase()))
-        return { status: "good", msg: `Set to "${val.trim()}" — referrer information is properly restricted.` };
-      return { status: "warn", msg: `Set to "${val.trim()}" — consider a stricter policy like "strict-origin-when-cross-origin" or "same-origin".` };
+        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — referrer information is properly restricted.` };
+      return { status: "warn", msg: `Set to "${escapeHtml(val.trim())}" — consider a stricter policy like "strict-origin-when-cross-origin" or "same-origin".` };
     }
   },
   "strict-transport-security": {
@@ -126,7 +126,7 @@ const SECURITY_HEADERS = {
       if (!val) return { status: "bad", msg: "Missing — the browser may MIME-sniff responses and interpret files as a different content type than intended." };
       if (val.trim().toLowerCase() === "nosniff")
         return { status: "good", msg: "Set to 'nosniff' — MIME-type sniffing is blocked." };
-      return { status: "warn", msg: `Unexpected value: "${val}". The only valid value is "nosniff".` };
+      return { status: "warn", msg: `Unexpected value: "${escapeHtml(val)}". The only valid value is "nosniff".` };
     }
   },
   "x-frame-options": {
@@ -146,7 +146,7 @@ const SECURITY_HEADERS = {
       const v = val.trim().toUpperCase();
       if (v === "DENY" || v === "SAMEORIGIN")
         return { status: "good", msg: `Set to "${v}" — clickjacking protection is active.` };
-      return { status: "warn", msg: `Set to "${val}" — consider using DENY or SAMEORIGIN.` };
+      return { status: "warn", msg: `Set to "${escapeHtml(val)}" — consider using DENY or SAMEORIGIN.` };
     }
   }
 };
@@ -159,7 +159,7 @@ const ADDITIONAL_HEADERS = {
     recommendation: "Set to <code>same-origin</code> for maximum isolation. Use <code>same-origin-allow-popups</code> if your site needs to open cross-origin popups (e.g. OAuth flows).",
     evaluate: (val) => {
       if (!val) return { status: "info", msg: "Not set — cross-origin windows may be able to reference your page. Consider adding for cross-origin isolation." };
-      return { status: "good", msg: `Set to "${val.trim()}" — cross-origin window access is restricted.` };
+      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — cross-origin window access is restricted.` };
     }
   },
   "cross-origin-resource-policy": {
@@ -169,7 +169,7 @@ const ADDITIONAL_HEADERS = {
     recommendation: "Set to <code>same-origin</code> if your resources should only be loaded by your own site. Use <code>same-site</code> to allow subdomains. Use <code>cross-origin</code> only for public resources like CDN assets.",
     evaluate: (val) => {
       if (!val) return { status: "info", msg: "Not set — any origin can load your resources. Consider restricting this." };
-      return { status: "good", msg: `Set to "${val.trim()}" — resource loading is restricted by origin.` };
+      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — resource loading is restricted by origin.` };
     }
   },
   "cross-origin-embedder-policy": {
@@ -179,7 +179,7 @@ const ADDITIONAL_HEADERS = {
     recommendation: "Set to <code>require-corp</code> for full isolation. Note: all cross-origin resources must include appropriate CORS or CORP headers, or they will be blocked.",
     evaluate: (val) => {
       if (!val) return { status: "info", msg: "Not set — recommended for full cross-origin isolation (required for SharedArrayBuffer)." };
-      return { status: "good", msg: `Set to "${val.trim()}" — cross-origin resource loading requires explicit permission.` };
+      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — cross-origin resource loading requires explicit permission.` };
     }
   },
   "x-xss-protection": {
@@ -191,7 +191,7 @@ const ADDITIONAL_HEADERS = {
       if (!val) return { status: "info", msg: "Not set — not required if you have a Content Security Policy. The legacy XSS Auditor has been removed from modern browsers." };
       if (val.trim() === "0")
         return { status: "good", msg: "Set to '0' — legacy XSS Auditor is disabled. CSP should be used for XSS protection instead." };
-      return { status: "warn", msg: `Set to "${val.trim()}" — consider setting to '0' to disable the flawed legacy auditor, and rely on CSP instead.` };
+      return { status: "warn", msg: `Set to "${escapeHtml(val.trim())}" — consider setting to '0' to disable the flawed legacy auditor, and rely on CSP instead.` };
     }
   },
   "x-robots-tag": {
@@ -206,12 +206,12 @@ const ADDITIONAL_HEADERS = {
       const hasNofollow = /nofollow/.test(lower);
       const hasNone = /\bnone\b/.test(lower);
       if (hasNone || (hasNoindex && hasNofollow))
-        return { status: "good", msg: `Set to "${val.trim()}" — page is hidden from search engines and links are not followed.` };
+        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — page is hidden from search engines and links are not followed.` };
       if (hasNoindex)
-        return { status: "good", msg: `Set to "${val.trim()}" — page will not appear in search results.` };
+        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — page will not appear in search results.` };
       if (hasNofollow)
-        return { status: "info", msg: `Set to "${val.trim()}" — search engines won't follow links on this page, but the page itself may still be indexed.` };
-      return { status: "info", msg: `Set to "${val.trim()}".` };
+        return { status: "info", msg: `Set to "${escapeHtml(val.trim())}" — search engines won't follow links on this page, but the page itself may still be indexed.` };
+      return { status: "info", msg: `Set to "${escapeHtml(val.trim())}".` };
     }
   },
   "alt-svc": {
@@ -224,7 +224,7 @@ const ADDITIONAL_HEADERS = {
       const hasH3 = /h3/.test(val);
       if (hasH3)
         return { status: "good", msg: "HTTP/3 (QUIC) is available — faster, more reliable connections with built-in TLS 1.3 encryption." };
-      return { status: "info", msg: `Alternative service advertised: "${val.trim()}".` };
+      return { status: "info", msg: `Alternative service advertised: "${escapeHtml(val.trim())}".` };
     }
   },
   "nel": {
@@ -258,7 +258,7 @@ const DISCLOSURE_HEADERS = {
       if (!val) return null; // Not present, nothing to flag
       // Flag if it contains a version number (e.g. nginx/1.18.0, Apache/2.4.41)
       if (/\/[\d]/.test(val))
-        return { msg: `Exposes software version: "${val}". Remove the version number to make fingerprinting harder.`, detail: "Attackers use version info to look up known vulnerabilities for that exact release." };
+        return { msg: `Exposes software version: "${escapeHtml(val)}". Remove the version number to make fingerprinting harder.`, detail: "Attackers use version info to look up known vulnerabilities for that exact release." };
       return null;
     }
   },
@@ -266,35 +266,35 @@ const DISCLOSURE_HEADERS = {
     label: "X-Powered-By",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Exposes backend technology: "${val}". This header should be removed entirely.`, detail: "Knowing the framework/language helps attackers narrow down exploits. There is no reason to send this header." };
+      return { msg: `Exposes backend technology: "${escapeHtml(val)}". This header should be removed entirely.`, detail: "Knowing the framework/language helps attackers narrow down exploits. There is no reason to send this header." };
     }
   },
   "x-aspnet-version": {
     label: "X-AspNet-Version",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Exposes ASP.NET version: "${val}". Remove this header in your web.config.`, detail: "Version-specific exploits are well-documented for ASP.NET. Hiding this adds a layer of obscurity." };
+      return { msg: `Exposes ASP.NET version: "${escapeHtml(val)}". Remove this header in your web.config.`, detail: "Version-specific exploits are well-documented for ASP.NET. Hiding this adds a layer of obscurity." };
     }
   },
   "x-aspnetmvc-version": {
     label: "X-AspNetMvc-Version",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Exposes ASP.NET MVC version: "${val}". Remove via MvcHandler.DisableMvcResponseHeader.`, detail: "This reveals your exact MVC framework version, making targeted attacks easier." };
+      return { msg: `Exposes ASP.NET MVC version: "${escapeHtml(val)}". Remove via MvcHandler.DisableMvcResponseHeader.`, detail: "This reveals your exact MVC framework version, making targeted attacks easier." };
     }
   },
   "x-generator": {
     label: "X-Generator",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Exposes site generator: "${val}". Consider removing this header.`, detail: "CMS and generator info helps attackers identify known vulnerabilities for your platform." };
+      return { msg: `Exposes site generator: "${escapeHtml(val)}". Consider removing this header.`, detail: "CMS and generator info helps attackers identify known vulnerabilities for your platform." };
     }
   },
   "via": {
     label: "Via",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Exposes proxy/gateway info: "${val}". Consider removing if not needed.`, detail: "This can reveal internal infrastructure details like proxy software and topology." };
+      return { msg: `Exposes proxy/gateway info: "${escapeHtml(val)}". Consider removing if not needed.`, detail: "This can reveal internal infrastructure details like proxy software and topology." };
     }
   },
   "x-debug-token": {
@@ -308,7 +308,7 @@ const DISCLOSURE_HEADERS = {
     label: "X-Debug-Token-Link",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Debug profiler link exposed: "${val}". Remove in production.`, detail: "This links directly to your debug profiler — a critical information leak in production." };
+      return { msg: `Debug profiler link exposed: "${escapeHtml(val)}". Remove in production.`, detail: "This links directly to your debug profiler — a critical information leak in production." };
     }
   }
 };
@@ -340,7 +340,7 @@ const DEPRECATED_HEADERS = {
     label: "X-Runtime",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Exposes server processing time: "${val}". Consider removing.`, detail: "Timing information can help attackers perform timing-based side-channel attacks to enumerate users or detect differences in code paths." };
+      return { msg: `Exposes server processing time: "${escapeHtml(val)}". Consider removing.`, detail: "Timing information can help attackers perform timing-based side-channel attacks to enumerate users or detect differences in code paths." };
     }
   }
 };
