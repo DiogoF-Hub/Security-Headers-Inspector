@@ -300,7 +300,7 @@ body.theme-transition *::after {
   display: none !important;
 }
 
-/* Details area — animated */
+/* Details area, animated */
 #details {
   padding: 0;
   max-height: 0;
@@ -314,7 +314,7 @@ body.theme-transition *::after {
   opacity: 1;
 }
 
-/* Raw headers — animated */
+/* Raw headers, animated */
 #raw-headers {
   max-height: 0;
   overflow: hidden;
@@ -682,7 +682,7 @@ body.light .header-item.warn .desc-verdict {
   opacity: 0;
 }
 
-/* Raw cookie value blur — only the value between = and ; */
+/* Raw cookie value blur: only the value between = and ; */
 .raw-cookie-value {
   transition: filter 0.25s ease;
 }

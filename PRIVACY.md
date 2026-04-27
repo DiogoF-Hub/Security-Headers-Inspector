@@ -21,8 +21,8 @@
 
 All data remains entirely on your device:
 
-- **Session storage** — captured HTTP headers per tab, automatically cleared when the browser session ends
-- **Local storage** — theme preference (light or dark) only
+- **Session storage**: captured HTTP headers per tab, automatically cleared when the browser session ends
+- **Local storage**: theme preference (light or dark) only
 
 ## External links
 

@@ -1,4 +1,4 @@
-// MV3 service worker — webRequest observation is still available.
+// MV3 service worker. webRequest observation is still available.
 // State is persisted via chrome.storage.session since service workers are ephemeral.
 
 // Allow storage.session to be accessed by the popup too
@@ -16,7 +16,7 @@ chrome.storage.session.get(["tabHeaders", "fetchedHeaders"], (result) => {
   if (result.fetchedHeaders) fetchedHeaders = result.fetchedHeaders;
 });
 
-// Debounce storage writes — many tabs completing at once would otherwise
+// Debounce storage writes. Many tabs completing at once would otherwise
 // serialize the entire object dozens of times per second.
 let saveTabHeadersTimer = null;
 function saveTabHeaders() {
@@ -81,11 +81,11 @@ chrome.webRequest.onHeadersReceived.addListener(
 
     if (details.type === "main_frame") {
       if (details.statusCode === 304 && tabHeaders[details.tabId]) {
-        // 304 Not Modified — server sends minimal headers.
+        // 304 Not Modified, server sends minimal headers.
         // Keep the existing full header set, just update the timestamp.
         tabHeaders[details.tabId].timestamp = Date.now();
       } else {
-        // Full response — store all headers
+        // Full response, store all headers
         // Preserve cookies from previous load if server didn't send new ones
         if (cookies.length === 0 && tabHeaders[details.tabId] && tabHeaders[details.tabId].cookies && tabHeaders[details.tabId].cookies.length > 0) {
           data.cookies = tabHeaders[details.tabId].cookies;
@@ -100,7 +100,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 
       saveTabHeaders();
     } else {
-      // Could be a fetch from this service worker — store by URL
+      // Could be a fetch from this service worker, store by URL
       fetchedHeaders[details.url] = data;
       saveFetchedHeaders();
     }
@@ -163,7 +163,7 @@ function scanTab(tab) {
       }, 150);
     })
     .catch(() => {
-      // Fetch blocked (CORS, restricted domain, etc.) — mark tab so popup can show why
+      // Fetch blocked (CORS, restricted domain, etc.), mark tab so popup can show why
       if (!tabHeaders[tab.id]) {
         tabHeaders[tab.id] = { restricted: true, url: url, timestamp: Date.now() };
         saveTabHeaders();
@@ -280,7 +280,7 @@ function mergeSupplementaryData(tabId, webReqData) {
   }
 }
 
-// Throttle supplementary fetches from tabs.onUpdated — queue them so only
+// Throttle supplementary fetches from tabs.onUpdated. Queue them so only
 // a few run at a time when many tabs finish loading at once.
 const supplementaryQueue = [];
 let activeFetches = 0;
@@ -424,7 +424,7 @@ const HEADER_WEIGHTS = {
 };
 const MAX_SCORE = 120;
 
-// CSP quality penalty — caps score if script-src has unsafe-inline/unsafe-eval
+// CSP quality penalty: caps score if script-src has unsafe-inline/unsafe-eval
 function applyCSPPenalty(csp, score) {
   if (!csp) return score;
   const directives = {};

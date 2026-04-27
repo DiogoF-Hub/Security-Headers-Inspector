@@ -6,7 +6,7 @@ const SECURITY_HEADERS = {
     good: "A well-configured CSP significantly reduces the risk of cross-site scripting and data injection attacks. It acts as a second layer of defense against injection vulnerabilities.",
     recommendation: "Start with a strict policy like <code>default-src 'none'</code> and selectively allow only what your site needs. Avoid <code>'unsafe-inline'</code> and <code>'unsafe-eval'</code> when possible as they weaken protection considerably.",
     evaluate: (val) => {
-      if (!val) return { status: "bad", msg: "Missing — your site has no Content Security Policy, leaving it vulnerable to XSS and data injection attacks." };
+      if (!val) return { status: "bad", msg: "Missing. Your site has no Content Security Policy, leaving it vulnerable to XSS and data injection attacks." };
 
       // Parse directives
       const directives = {};
@@ -21,45 +21,45 @@ const SECURITY_HEADERS = {
       const objectSrc = directives["object-src"] || defaultSrc;
       const baseSrc = directives["base-uri"] || [];
 
-      // 'strict-dynamic' negates 'unsafe-inline' in modern browsers — don't flag it
+      // 'strict-dynamic' negates 'unsafe-inline' in modern browsers, don't flag it
       const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
       const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
       const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
 
       // Check 'unsafe-eval' (but not 'wasm-unsafe-eval')
       if (scriptSrc.some(s => s === "'unsafe-eval'"))
-        warnings.push("script-src uses <code>'unsafe-eval'</code> — allows dynamic code execution via eval().");
+        warnings.push("script-src uses <code>'unsafe-eval'</code>: allows dynamic code execution via eval().");
 
-      // Check 'unsafe-inline' — only flag if strict-dynamic/nonce/hash don't negate it
+      // Check 'unsafe-inline', only flag if strict-dynamic/nonce/hash don't negate it
       if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash)
-        warnings.push("script-src uses <code>'unsafe-inline'</code> — allows inline scripts, weakening XSS protection.");
+        warnings.push("script-src uses <code>'unsafe-inline'</code>: allows inline scripts, weakening XSS protection.");
 
       // Wildcard * in script-src
       if (scriptSrc.includes("*"))
-        warnings.push("script-src contains <code>*</code> wildcard — scripts can be loaded from any origin.");
+        warnings.push("script-src contains <code>*</code> wildcard: scripts can be loaded from any origin.");
 
-      // data: in script-src — allows base64-encoded script injection
+      // data: in script-src allows base64-encoded script injection
       if (scriptSrc.includes("data:"))
-        warnings.push("script-src allows <code>data:</code> URIs — attackers can inject base64-encoded scripts.");
+        warnings.push("script-src allows <code>data:</code> URIs: attackers can inject base64-encoded scripts.");
 
-      // http: in script-src — mixed content, MITM risk
+      // http: in script-src is mixed content, MITM risk
       if (scriptSrc.some(s => s.startsWith("http://")))
-        warnings.push("script-src allows <code>http://</code> sources — scripts loaded over plain HTTP can be intercepted.");
+        warnings.push("script-src allows <code>http://</code> sources: scripts loaded over plain HTTP can be intercepted.");
 
-      // Missing default-src — no fallback for undeclared directives
+      // Missing default-src means no fallback for undeclared directives
       if (!directives["default-src"])
-        warnings.push("No <code>default-src</code> directive — undeclared resource types have no restrictions.");
+        warnings.push("No <code>default-src</code> directive: undeclared resource types have no restrictions.");
 
-      // object-src not restricted — Flash/plugin injection vector
+      // object-src not restricted is a Flash/plugin injection vector
       if (objectSrc.length === 0 || (objectSrc.length === 1 && objectSrc[0] === "'self'")) {
         // Fine
       } else if (!objectSrc.includes("'none'") && !directives["object-src"]) {
-        warnings.push("<code>object-src</code> is not explicitly set — consider setting to <code>'none'</code> to block plugins.");
+        warnings.push("<code>object-src</code> is not explicitly set: consider setting to <code>'none'</code> to block plugins.");
       }
 
-      // base-uri not restricted — allows base tag injection
+      // base-uri not restricted allows base tag injection
       if (baseSrc.length === 0 && !directives["base-uri"])
-        warnings.push("<code>base-uri</code> is not set — attackers could inject a <code>&lt;base&gt;</code> tag to hijack relative URLs.");
+        warnings.push("<code>base-uri</code> is not set: attackers could inject a <code>&lt;base&gt;</code> tag to hijack relative URLs.");
 
       // Wildcard in any directive
       const wildcardDirs = Object.entries(directives)
@@ -69,7 +69,7 @@ const SECURITY_HEADERS = {
         warnings.push(`Wildcard <code>*</code> found in: ${wildcardDirs.map(d => `<code>${escapeHtml(d)}</code>`).join(", ")}.`);
 
       if (warnings.length === 0)
-        return { status: "good", msg: "Well configured — approved content sources are whitelisted." };
+        return { status: "good", msg: "Well configured. Approved content sources are whitelisted." };
 
       return { status: "warn", msg: warnings.join("<br>") };
     }
@@ -80,21 +80,21 @@ const SECURITY_HEADERS = {
     good: "Restricting unused features reduces your attack surface. Even if an attacker injects code, they cannot access features you've disabled. It also prevents third-party iframes from using powerful features without your consent.",
     recommendation: "Disable all features you don't use with an empty allowlist, e.g. <code>camera=()</code>, <code>microphone=()</code>. Only enable features your site actually requires.",
     evaluate: (val) => {
-      if (!val) return { status: "bad", msg: "Missing — any embedded content can request access to browser features like camera, microphone, and geolocation." };
+      if (!val) return { status: "bad", msg: "Missing. Any embedded content can request access to browser features like camera, microphone, and geolocation." };
       return { status: "good", msg: "Browser feature access is restricted via policy." };
     }
   },
   "referrer-policy": {
     label: "Referrer-Policy",
-    about: "Referrer Policy controls how much referrer information (the URL of the previous page) the browser includes when navigating away from your site. Without it, full URLs — potentially containing sensitive data like tokens, user IDs, or internal paths — can leak to third parties.",
+    about: "Referrer Policy controls how much referrer information (the URL of the previous page) the browser includes when navigating away from your site. Without it, full URLs (potentially containing sensitive data like tokens, user IDs, or internal paths) can leak to third parties.",
     good: "A strict referrer policy prevents leaking private URL paths and query parameters to external sites. This is especially important for pages that contain sensitive information in the URL.",
-    recommendation: "Use <code>strict-origin-when-cross-origin</code> (a good default), <code>same-origin</code> (strictest — no referrer to other sites), or <code>no-referrer</code> (never send referrer). Avoid <code>unsafe-url</code> which sends the full URL everywhere.",
+    recommendation: "Use <code>strict-origin-when-cross-origin</code> (a good default), <code>same-origin</code> (strictest, no referrer to other sites), or <code>no-referrer</code> (never send referrer). Avoid <code>unsafe-url</code> which sends the full URL everywhere.",
     evaluate: (val) => {
-      if (!val) return { status: "bad", msg: "Missing — full referrer URLs (including paths and query strings) may leak to external sites." };
+      if (!val) return { status: "bad", msg: "Missing. Full referrer URLs (including paths and query strings) may leak to external sites." };
       const strong = ["no-referrer", "same-origin", "strict-origin", "strict-origin-when-cross-origin"];
       if (strong.includes(val.trim().toLowerCase()))
-        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — referrer information is properly restricted.` };
-      return { status: "warn", msg: `Set to "${escapeHtml(val.trim())}" — consider a stricter policy like "strict-origin-when-cross-origin" or "same-origin".` };
+        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}". Referrer information is properly restricted.` };
+      return { status: "warn", msg: `Set to "${escapeHtml(val.trim())}". Consider a stricter policy like "strict-origin-when-cross-origin" or "same-origin".` };
     }
   },
   "strict-transport-security": {
@@ -103,13 +103,13 @@ const SECURITY_HEADERS = {
     good: "HSTS ensures all communication is encrypted. Once the browser sees this header, it will refuse to connect over plain HTTP for the specified duration, protecting against man-in-the-middle attacks on the initial connection.",
     recommendation: "Set <code>max-age</code> to at least 31536000 (1 year). Add <code>includeSubDomains</code> to protect all subdomains. Add <code>preload</code> and submit your site to the HSTS preload list for protection on the very first visit.",
     evaluate: (val) => {
-      if (!val) return { status: "bad", msg: "Missing — connections can be downgraded to unencrypted HTTP, exposing data to interception." };
+      if (!val) return { status: "bad", msg: "Missing. Connections can be downgraded to unencrypted HTTP, exposing data to interception." };
       const maxAgeMatch = val.match(/max-age=(\d+)/);
       const maxAge = maxAgeMatch ? parseInt(maxAgeMatch[1]) : 0;
       const hasSub = val.toLowerCase().includes("includesubdomains");
       const hasPreload = val.toLowerCase().includes("preload");
       if (maxAge >= 31536000 && hasSub && hasPreload)
-        return { status: "good", msg: `Excellent — max-age=${maxAge} (${Math.round(maxAge/86400)} days), includeSubDomains, and preload are all set.` };
+        return { status: "good", msg: `Excellent. max-age=${maxAge} (${Math.round(maxAge/86400)} days), includeSubDomains, and preload are all set.` };
       if (maxAge >= 31536000)
         return { status: "good", msg: `max-age=${maxAge} is good. Consider adding includeSubDomains and preload for complete coverage.` };
       if (maxAge < 2592000)
@@ -119,13 +119,13 @@ const SECURITY_HEADERS = {
   },
   "x-content-type-options": {
     label: "X-Content-Type-Options",
-    about: "X-Content-Type-Options stops the browser from trying to MIME-sniff the content type of a response and forces it to use the declared Content-Type. Without this, a browser might interpret a file differently than intended — for example, treating a plain text file as JavaScript.",
+    about: "X-Content-Type-Options stops the browser from trying to MIME-sniff the content type of a response and forces it to use the declared Content-Type. Without this, a browser might interpret a file differently than intended, for example treating a plain text file as JavaScript.",
     good: "Setting this header to 'nosniff' prevents MIME-type confusion attacks. An attacker cannot trick the browser into executing a non-script resource as code, which is a common vector for XSS via uploaded files.",
-    recommendation: "Always set this to <code>nosniff</code>. There is no reason not to — it has no side effects on properly configured sites.",
+    recommendation: "Always set this to <code>nosniff</code>. There is no reason not to, it has no side effects on properly configured sites.",
     evaluate: (val) => {
-      if (!val) return { status: "bad", msg: "Missing — the browser may MIME-sniff responses and interpret files as a different content type than intended." };
+      if (!val) return { status: "bad", msg: "Missing. The browser may MIME-sniff responses and interpret files as a different content type than intended." };
       if (val.trim().toLowerCase() === "nosniff")
-        return { status: "good", msg: "Set to 'nosniff' — MIME-type sniffing is blocked." };
+        return { status: "good", msg: "Set to 'nosniff'. MIME-type sniffing is blocked." };
       return { status: "warn", msg: `Unexpected value: "${escapeHtml(val)}". The only valid value is "nosniff".` };
     }
   },
@@ -139,14 +139,14 @@ const SECURITY_HEADERS = {
         // Check if CSP frame-ancestors covers this
         const csp = (allHeaders && allHeaders["content-security-policy"]) || "";
         if (/frame-ancestors\s/.test(csp)) {
-          return { status: "good", msg: "Not set, but CSP frame-ancestors is configured — this is the modern replacement and takes precedence." };
+          return { status: "good", msg: "Not set, but CSP frame-ancestors is configured. This is the modern replacement and takes precedence." };
         }
-        return { status: "bad", msg: "Missing — your site can be embedded in iframes by any page, making it vulnerable to clickjacking." };
+        return { status: "bad", msg: "Missing. Your site can be embedded in iframes by any page, making it vulnerable to clickjacking." };
       }
       const v = val.trim().toUpperCase();
       if (v === "DENY" || v === "SAMEORIGIN")
-        return { status: "good", msg: `Set to "${v}" — clickjacking protection is active.` };
-      return { status: "warn", msg: `Set to "${escapeHtml(val)}" — consider using DENY or SAMEORIGIN.` };
+        return { status: "good", msg: `Set to "${v}". Clickjacking protection is active.` };
+      return { status: "warn", msg: `Set to "${escapeHtml(val)}". Consider using DENY or SAMEORIGIN.` };
     }
   }
 };
@@ -158,8 +158,8 @@ const ADDITIONAL_HEADERS = {
     good: "Enabling COOP isolates your browsing context. Cross-origin pages cannot manipulate your window object, preventing attacks like Spectre-based side-channel data leaks and cross-origin window manipulation.",
     recommendation: "Set to <code>same-origin</code> for maximum isolation. Use <code>same-origin-allow-popups</code> if your site needs to open cross-origin popups (e.g. OAuth flows).",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — cross-origin windows may be able to reference your page. Consider adding for cross-origin isolation." };
-      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — cross-origin window access is restricted.` };
+      if (!val) return { status: "info", msg: "Not set. Cross-origin windows may be able to reference your page. Consider adding for cross-origin isolation." };
+      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}". Cross-origin window access is restricted.` };
     }
   },
   "cross-origin-resource-policy": {
@@ -168,8 +168,8 @@ const ADDITIONAL_HEADERS = {
     good: "Restricting who can load your resources prevents unauthorized sites from reading your content. This is particularly important for authenticated resources that should not be accessible cross-origin.",
     recommendation: "Set to <code>same-origin</code> if your resources should only be loaded by your own site. Use <code>same-site</code> to allow subdomains. Use <code>cross-origin</code> only for public resources like CDN assets.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — any origin can load your resources. Consider restricting this." };
-      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — resource loading is restricted by origin.` };
+      if (!val) return { status: "info", msg: "Not set. Any origin can load your resources. Consider restricting this." };
+      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}". Resource loading is restricted by origin.` };
     }
   },
   "cross-origin-embedder-policy": {
@@ -178,8 +178,8 @@ const ADDITIONAL_HEADERS = {
     good: "COEP prevents your page from loading cross-origin resources that haven't granted permission. This blocks speculative execution attacks (like Spectre) from leaking data across origins.",
     recommendation: "Set to <code>require-corp</code> for full isolation. Note: all cross-origin resources must include appropriate CORS or CORP headers, or they will be blocked.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — recommended for full cross-origin isolation (required for SharedArrayBuffer)." };
-      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — cross-origin resource loading requires explicit permission.` };
+      if (!val) return { status: "info", msg: "Not set. Recommended for full cross-origin isolation (required for SharedArrayBuffer)." };
+      return { status: "good", msg: `Set to "${escapeHtml(val.trim())}". Cross-origin resource loading requires explicit permission.` };
     }
   },
   "x-xss-protection": {
@@ -188,29 +188,29 @@ const ADDITIONAL_HEADERS = {
     good: "Modern browsers have removed the XSS Auditor entirely. Setting this to '0' is now recommended to disable it in any remaining older browsers, as the auditor itself could be exploited. Content Security Policy is the proper replacement.",
     recommendation: "Set to <code>0</code> to disable the legacy auditor. Rely on a strong Content-Security-Policy header instead for XSS protection.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — not required if you have a Content Security Policy. The legacy XSS Auditor has been removed from modern browsers." };
+      if (!val) return { status: "info", msg: "Not set. Not required if you have a Content Security Policy. The legacy XSS Auditor has been removed from modern browsers." };
       if (val.trim() === "0")
-        return { status: "good", msg: "Set to '0' — legacy XSS Auditor is disabled. CSP should be used for XSS protection instead." };
-      return { status: "warn", msg: `Set to "${escapeHtml(val.trim())}" — consider setting to '0' to disable the flawed legacy auditor, and rely on CSP instead.` };
+        return { status: "good", msg: "Set to '0'. Legacy XSS Auditor is disabled. CSP should be used for XSS protection instead." };
+      return { status: "warn", msg: `Set to "${escapeHtml(val.trim())}". Consider setting to '0' to disable the flawed legacy auditor, and rely on CSP instead.` };
     }
   },
   "x-robots-tag": {
     label: "X-Robots-Tag",
-    about: "The X-Robots-Tag HTTP header controls how search engines index and display your pages. It works like the <code>&lt;meta name=\"robots\"&gt;</code> HTML tag but applies at the HTTP level — useful for non-HTML resources (PDFs, images) or when you want server-wide control without modifying page content.",
+    about: "The X-Robots-Tag HTTP header controls how search engines index and display your pages. It works like the <code>&lt;meta name=\"robots\"&gt;</code> HTML tag but applies at the HTTP level, useful for non-HTML resources (PDFs, images) or when you want server-wide control without modifying page content.",
     good: "Controlling search engine behavior lets you prevent sensitive pages from appearing in search results, stop caching of private content, and manage how your site is represented in search engines. For internal tools or private services, <code>noindex, nofollow</code> keeps them out of search entirely.",
-    recommendation: "Set to <code>noindex, nofollow</code> for private or internal pages. Use <code>noindex</code> alone to prevent indexing but still allow link following. For public pages, this header is usually not needed — search engines index by default.",
+    recommendation: "Set to <code>noindex, nofollow</code> for private or internal pages. Use <code>noindex</code> alone to prevent indexing but still allow link following. For public pages, this header is usually not needed since search engines index by default.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — search engines will index this page by default. Set this header if you want to control search engine behavior at the HTTP level." };
+      if (!val) return { status: "info", msg: "Not set. Search engines will index this page by default. Set this header if you want to control search engine behavior at the HTTP level." };
       const lower = val.toLowerCase();
       const hasNoindex = /noindex/.test(lower);
       const hasNofollow = /nofollow/.test(lower);
       const hasNone = /\bnone\b/.test(lower);
       if (hasNone || (hasNoindex && hasNofollow))
-        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — page is hidden from search engines and links are not followed.` };
+        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}". Page is hidden from search engines and links are not followed.` };
       if (hasNoindex)
-        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}" — page will not appear in search results.` };
+        return { status: "good", msg: `Set to "${escapeHtml(val.trim())}". Page will not appear in search results.` };
       if (hasNofollow)
-        return { status: "info", msg: `Set to "${escapeHtml(val.trim())}" — search engines won't follow links on this page, but the page itself may still be indexed.` };
+        return { status: "info", msg: `Set to "${escapeHtml(val.trim())}". Search engines won't follow links on this page, but the page itself may still be indexed.` };
       return { status: "info", msg: `Set to "${escapeHtml(val.trim())}".` };
     }
   },
@@ -220,36 +220,36 @@ const ADDITIONAL_HEADERS = {
     good: "HTTP/3 uses QUIC, a UDP-based transport protocol with built-in TLS 1.3 encryption. It eliminates head-of-line blocking, reduces connection setup time (0-RTT), and handles network changes (e.g., switching from Wi-Fi to mobile) more gracefully than TCP.",
     recommendation: "If your server supports HTTP/3 (QUIC), this header is set automatically. Major web servers (Nginx, Caddy, LiteSpeed) and CDNs (Cloudflare, Fastly) support it. No action needed if you see <code>h3</code> in the value.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — the site is not advertising HTTP/3 (QUIC) support. The site uses HTTP/1.1 or HTTP/2 only." };
+      if (!val) return { status: "info", msg: "Not set. The site is not advertising HTTP/3 (QUIC) support. The site uses HTTP/1.1 or HTTP/2 only." };
       const hasH3 = /h3/.test(val);
       if (hasH3)
-        return { status: "good", msg: "HTTP/3 (QUIC) is available — faster, more reliable connections with built-in TLS 1.3 encryption." };
+        return { status: "good", msg: "HTTP/3 (QUIC) is available. Faster, more reliable connections with built-in TLS 1.3 encryption." };
       return { status: "info", msg: `Alternative service advertised: "${escapeHtml(val.trim())}".` };
     }
   },
   "nel": {
     label: "NEL",
     about: "Network Error Logging (NEL) instructs the browser to send reports during various network or application errors. It collects information about failed connections, DNS resolution errors, TLS negotiation failures, and other network-level issues that happen before your server even sees the request.",
-    good: "NEL gives you visibility into network errors your users experience that traditional server-side logging cannot capture — such as DNS failures, TCP timeouts, and TLS errors. This helps diagnose connectivity issues affecting real users.",
+    good: "NEL gives you visibility into network errors your users experience that traditional server-side logging cannot capture, such as DNS failures, TCP timeouts, and TLS errors. This helps diagnose connectivity issues affecting real users.",
     recommendation: "Configure a NEL policy with a JSON value specifying <code>report_to</code> group, <code>max_age</code>, and optionally <code>failure_fraction</code> to sample errors. Pair with the <code>Report-To</code> header to define where reports are sent. Services like Report URI can collect these reports for free.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — the site is not collecting network error reports. Consider enabling NEL to detect DNS, TLS, and connection failures affecting users." };
-      return { status: "good", msg: "Network Error Logging is configured — the browser will report network-level errors to help diagnose connectivity issues." };
+      if (!val) return { status: "info", msg: "Not set. The site is not collecting network error reports. Consider enabling NEL to detect DNS, TLS, and connection failures affecting users." };
+      return { status: "good", msg: "Network Error Logging is configured. The browser will report network-level errors to help diagnose connectivity issues." };
     }
   },
   "report-to": {
     label: "Report-To",
-    about: "The Report-To header enables the Reporting API, which allows a website to collect reports from the browser about various errors that may occur — including Content Security Policy violations, deprecations, browser interventions, network errors, and crash reports.",
+    about: "The Report-To header enables the Reporting API, which allows a website to collect reports from the browser about various errors that may occur, including Content Security Policy violations, deprecations, browser interventions, network errors, and crash reports.",
     good: "Having the Reporting API configured means you are actively collecting data about issues your users encounter. This helps you detect CSP violations, deprecated API usage, and other problems in production without relying on users to report them.",
     recommendation: "Configure a reporting endpoint using <code>Report-To</code> with a JSON value specifying group name, max age, and endpoint URLs. Pair with CSP's <code>report-to</code> directive to collect violation reports. Services like Report URI can collect these reports for free.",
     evaluate: (val) => {
-      if (!val) return { status: "info", msg: "Not set — the site is not collecting browser reports. Consider enabling the Reporting API to monitor CSP violations and other errors in production." };
-      return { status: "good", msg: "Reporting API is configured — the site collects browser reports for errors, CSP violations, and deprecations." };
+      if (!val) return { status: "info", msg: "Not set. The site is not collecting browser reports. Consider enabling the Reporting API to monitor CSP violations and other errors in production." };
+      return { status: "good", msg: "Reporting API is configured. The site collects browser reports for errors, CSP violations, and deprecations." };
     }
   }
 };
 
-// Information disclosure headers — these leak server/tech info to attackers.
+// Information disclosure headers: these leak server/tech info to attackers.
 // Not scored (matches securityheaders.com), just flagged as recommendations.
 const DISCLOSURE_HEADERS = {
   "server": {
@@ -308,12 +308,12 @@ const DISCLOSURE_HEADERS = {
     label: "X-Debug-Token-Link",
     check: (val) => {
       if (!val) return null;
-      return { msg: `Debug profiler link exposed: "${escapeHtml(val)}". Remove in production.`, detail: "This links directly to your debug profiler — a critical information leak in production." };
+      return { msg: `Debug profiler link exposed: "${escapeHtml(val)}". Remove in production.`, detail: "This links directly to your debug profiler, a critical information leak in production." };
     }
   }
 };
 
-// Deprecated headers — still sent by many sites but no longer useful or actively harmful.
+// Deprecated headers: still sent by many sites but no longer useful or actively harmful.
 const DEPRECATED_HEADERS = {
   "expect-ct": {
     label: "Expect-CT",
@@ -362,19 +362,19 @@ function analyzeCookie(cookieStr) {
   const issues = [];
 
   if (hasSecure) flags.push("Secure");
-  else issues.push("Missing <code>Secure</code> flag — cookie can be sent over unencrypted HTTP.");
+  else issues.push("Missing <code>Secure</code> flag. Cookie can be sent over unencrypted HTTP.");
 
   if (hasHttpOnly) flags.push("HttpOnly");
-  else issues.push("Missing <code>HttpOnly</code> flag — cookie is accessible to JavaScript (document.cookie).");
+  else issues.push("Missing <code>HttpOnly</code> flag. Cookie is accessible to JavaScript (document.cookie).");
 
   if (sameSite && sameSite !== "none") {
     flags.push(`SameSite=${sameSite.charAt(0).toUpperCase() + sameSite.slice(1)}`);
   } else if (sameSite === "none") {
-    // SameSite=None disables CSRF protection — securityheaders.com treats this as "not a SameSite cookie"
-    issues.push("<code>SameSite=None</code> — this effectively disables SameSite CSRF protection. Consider <code>SameSite=Lax</code> or <code>Strict</code>.");
+    // SameSite=None disables CSRF protection. securityheaders.com treats this as "not a SameSite cookie"
+    issues.push("<code>SameSite=None</code>. This effectively disables SameSite CSRF protection. Consider <code>SameSite=Lax</code> or <code>Strict</code>.");
     if (!hasSecure) issues.push("<code>SameSite=None</code> also requires the <code>Secure</code> flag.");
   } else {
-    issues.push("Missing <code>SameSite</code> attribute — browsers default to Lax, but setting it explicitly is recommended.");
+    issues.push("Missing <code>SameSite</code> attribute. Browsers default to Lax, but setting it explicitly is recommended.");
   }
 
   // Only flag missing prefix for known session cookies (matching securityheaders.com behavior)
@@ -402,7 +402,7 @@ const HEADER_WEIGHTS = {
 };
 const MAX_SCORE = 120;
 
-// CSP quality penalty — caps score if script-src has unsafe-inline/unsafe-eval
+// CSP quality penalty: caps score if script-src has unsafe-inline/unsafe-eval
 // IMPORTANT: keep in sync with the identical function in background.js
 function applyCSPPenalty(csp, score) {
   if (!csp) return score;
@@ -465,7 +465,7 @@ function computeGrade(headers) {
   return { letter, cssClass, present, total: securityKeys.length, score, pct };
 }
 
-// Ask the background page to fetch headers — the background's fetch triggers
+// Ask the background page to fetch headers. The background's fetch triggers
 // webRequest which can see ALL headers including HSTS
 function fetchHeadersViaBackground(url, tabId) {
   return new Promise((resolve) => {
@@ -515,7 +515,7 @@ function render(data) {
   currentHeaders = headers;
   const grade = computeGrade(headers);
 
-  // Resolve cookies once — webRequest array, falling back to headers["set-cookie"]
+  // Resolve cookies once: webRequest array, falling back to headers["set-cookie"]
   let resolvedCookies = data.cookies || [];
   if (resolvedCookies.length === 0 && headers["set-cookie"]) {
     resolvedCookies = [headers["set-cookie"]];
@@ -534,7 +534,7 @@ function render(data) {
     document.getElementById("site-url").textContent = data.url;
   }
   document.getElementById("site-summary").textContent =
-    `${grade.present}/${grade.total} security headers present — Score: ${Math.round(grade.pct)}%`;
+    `${grade.present}/${grade.total} security headers present. Score: ${Math.round(grade.pct)}%`;
 
   // Check if CSP frame-ancestors covers X-Frame-Options
   const csp = headers["content-security-policy"] || "";
@@ -604,7 +604,7 @@ function render(data) {
           ${analysis.issues.length > 0 ? '<div class="desc-verdict">' + analysis.issues.join('<br>') + '</div>' : '<div class="desc-verdict" style="color:#2ecc40;">All recommended cookie security flags are present.</div>'}
           <div class="desc-section">
             <div class="desc-title">What are cookie flags?</div>
-            <div class="desc-text"><strong>Secure</strong> — Cookie is only sent over HTTPS, preventing interception on unencrypted connections.<br><strong>HttpOnly</strong> — Cookie cannot be accessed by JavaScript (document.cookie), mitigating XSS theft.<br><strong>SameSite</strong> — Controls whether cookie is sent with cross-site requests, preventing CSRF attacks.<br><strong>Prefix</strong> — <code>__Secure-</code> or <code>__Host-</code> prefixes add extra browser-enforced constraints on the cookie.</div>
+            <div class="desc-text"><strong>Secure</strong>: Cookie is only sent over HTTPS, preventing interception on unencrypted connections.<br><strong>HttpOnly</strong>: Cookie cannot be accessed by JavaScript (document.cookie), mitigating XSS theft.<br><strong>SameSite</strong>: Controls whether cookie is sent with cross-site requests, preventing CSRF attacks.<br><strong>Prefix</strong>: <code>__Secure-</code> or <code>__Host-</code> prefixes add extra browser-enforced constraints on the cookie.</div>
           </div>
           <div class="desc-section">
             <div class="desc-title">Recommendation</div>
@@ -706,7 +706,7 @@ function render(data) {
   }
   deprecatedSection.style.display = deprecatedFound ? "" : "none";
 
-  // Raw headers — color-coded by type, with good tokens highlighted
+  // Raw headers, color-coded by type, with good tokens highlighted
   const securitySet = new Set(Object.keys(SECURITY_HEADERS).concat(Object.keys(ADDITIONAL_HEADERS)));
   const disclosureSet = new Set(Object.keys(DISCLOSURE_HEADERS));
   const deprecatedSet = new Set(Object.keys(DEPRECATED_HEADERS));
@@ -789,7 +789,7 @@ function highlightGoodTokens(headerName, value) {
   const patterns = GOOD_TOKENS[headerName.toLowerCase()];
   if (!patterns || !value) return escapeHtml(value || "");
 
-  // We need to escape first, then apply bold — but regex indices shift after escaping.
+  // We need to escape first, then apply bold, but regex indices shift after escaping.
   // Instead: find match positions in raw value, then build highlighted escaped output.
   const marks = []; // {start, end} ranges to bold
   for (const pattern of patterns) {
@@ -922,7 +922,7 @@ document.getElementById("copy-raw-btn").addEventListener("click", function () {
   });
 });
 
-// External scan buttons — get full URL and hostname from the active tab
+// External scan buttons: get full URL and hostname from the active tab
 function getActiveTabInfo(callback) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs[0] || !tabs[0].url) return;
@@ -945,7 +945,7 @@ document.getElementById("scan-ssllabs").addEventListener("click", () => {
   });
 });
 
-// Restricted page — "Why?" toggle
+// Restricted page: "Why?" toggle
 document.getElementById("restricted-why-toggle").addEventListener("click", () => {
   const btn = document.getElementById("restricted-why-toggle");
   const content = document.getElementById("restricted-why");
@@ -953,7 +953,7 @@ document.getElementById("restricted-why-toggle").addEventListener("click", () =>
   content.classList.toggle("show");
 });
 
-// Restricted page — scan buttons
+// Restricted page: scan buttons
 document.getElementById("restricted-scan-secheaders").addEventListener("click", () => {
   const url = document.getElementById("restricted-page").dataset.url;
   if (url) chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(url)}&hide=on&followRedirects=on`, active: false });
@@ -983,11 +983,11 @@ function renderInternalPage(url) {
   if (isOwnWelcome) {
     iconEl.innerHTML = "&#128075;";
     el.querySelector(".internal-title").textContent = "Hey, you found me!";
-    el.querySelector(".hint").innerHTML = "Trying to scan my own welcome page? Cheeky. &#128521;<br>Go visit a real website — I promise the headers there are more interesting.";
+    el.querySelector(".hint").innerHTML = "Trying to scan my own welcome page? Cheeky. &#128521;<br>Go visit a real website, I promise the headers there are more interesting.";
   } else {
     iconEl.innerHTML = "&#128274;";
     el.querySelector(".internal-title").textContent = "Internal Page";
-    el.querySelector(".hint").textContent = "Not a website — security headers don't apply here.";
+    el.querySelector(".hint").textContent = "Not a website. Security headers don't apply here.";
   }
 
   document.getElementById("internal-scheme").textContent = (url || "").split(/[?#]/)[0].substring(0, 60) + ((url || "").length > 60 ? "..." : "");
@@ -1034,7 +1034,7 @@ function scanActiveTab(forceRefresh = false) {
     document.getElementById("site-summary").textContent = "Fetching headers...";
 
     if (forceRefresh) {
-      // Skip cache — always do a fresh fetch via background
+      // Skip cache, always do a fresh fetch via background
       const data = await fetchHeadersViaBackground(url, tab.id);
       if (data && data.restricted) {
         renderRestrictedPage(url);

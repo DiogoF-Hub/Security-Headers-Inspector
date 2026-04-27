@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Security Headers Inspector",
-  "version": "1.6.5",
-  "description": "Instantly check security headers for any website — inspired by securityheaders.com",
+  "version": "1.6.6",
+  "description": "Instantly check security headers for any website, inspired by securityheaders.com",
   "permissions": [
     "alarms",
     "webRequest",
