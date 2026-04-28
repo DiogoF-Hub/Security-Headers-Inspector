@@ -8,8 +8,8 @@ const SECURITY_HEADERS = {
     evaluate: (val) => {
       if (!val) return { status: "bad", msg: "Missing. Your site has no Content Security Policy, leaving it vulnerable to XSS and data injection attacks." };
 
-      // Parse directives
-      const directives = {};
+      // Parse directives. Object.create(null) prevents a directive named __proto__ from mutating the prototype.
+      const directives = Object.create(null);
       val.split(";").forEach((d) => {
         const parts = d.trim().split(/\s+/);
         if (parts.length > 0) directives[parts[0]] = parts.slice(1);
@@ -406,7 +406,8 @@ const MAX_SCORE = 120;
 // IMPORTANT: keep in sync with the identical function in background.js
 function applyCSPPenalty(csp, score) {
   if (!csp) return score;
-  const directives = {};
+  // Object.create(null) prevents a CSP directive named __proto__ from mutating the prototype.
+  const directives = Object.create(null);
   csp.split(";").forEach((d) => {
     const parts = d.trim().split(/\s+/);
     if (parts.length > 0) directives[parts[0]] = parts.slice(1);
@@ -885,7 +886,7 @@ function createHeaderItem(key, def, value, allHeaders) {
 }
 
 function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // Wire up toggle button

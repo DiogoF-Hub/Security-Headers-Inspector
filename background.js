@@ -61,7 +61,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    const headers = {};
+    // Object.create(null) avoids prototype pollution if a server sends a header
+    // named __proto__ or constructor — those would mutate a regular object's prototype.
+    const headers = Object.create(null);
     const cookies = [];
     for (const header of details.responseHeaders) {
       const name = header.name.toLowerCase();
@@ -427,7 +429,8 @@ const MAX_SCORE = 120;
 // CSP quality penalty: caps score if script-src has unsafe-inline/unsafe-eval
 function applyCSPPenalty(csp, score) {
   if (!csp) return score;
-  const directives = {};
+  // Object.create(null) prevents a CSP directive named __proto__ from mutating the prototype.
+  const directives = Object.create(null);
   csp.split(";").forEach((d) => {
     const parts = d.trim().split(/\s+/);
     if (parts.length > 0) directives[parts[0]] = parts.slice(1);
