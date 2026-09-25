@@ -207,6 +207,7 @@ Security-Headers-Inspector/
 │   ├── unit/           Unit tests (Node, no dependencies)
 │   └── e2e/            Browser tests (Playwright + Chromium)
 ├── .github/workflows/  CI running both test suites
+├── package.sh / .ps1   Build the Chrome Web Store zip
 └── icons/
     ├── icon.svg        Source icon
     ├── icon16.png      Toolbar icon
@@ -255,7 +256,14 @@ npm run test:e2e    # browser tests against local test sites
 
 The browser tests start local HTTPS/HTTP test sites on ports 8443 and 8080 (change with `E2E_HTTPS_PORT` / `E2E_HTTP_PORT`) and need `openssl` to create a throwaway certificate. Both suites run on every push through GitHub Actions.
 
-When packaging for the Chrome Web Store, zip only the extension files: leave out `tests/`, `package.json` and `.github/`.
+### Packaging for the Chrome Web Store
+
+```
+./package.sh            # Linux / macOS (asks for the version)
+.\package.ps1           # Windows PowerShell
+```
+
+Both scripts ask for the version (or take it as an argument, like `./package.sh 2.0.1`), write it into `manifest.json` and `package.json`, and create `dist/security-headers-inspector-<version>.zip` with only the files the extension uses and `manifest.json` at the top level of the zip, as the store requires.
 
 ## Browser Compatibility
 
