@@ -12,3 +12,6 @@ CLAUDE.md
 # OS files
 Thumbs.db
 Desktop.ini
+
+# Test tooling
+node_modules/

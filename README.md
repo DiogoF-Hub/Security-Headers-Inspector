@@ -203,6 +203,10 @@ Security-Headers-Inspector/
 ├── options.css         Settings page styles
 ├── options.js          Settings page logic
 ├── welcome.html/.css   First-install welcome page
+├── tests/
+│   ├── unit/           Unit tests (Node, no dependencies)
+│   └── e2e/            Browser tests (Playwright + Chromium)
+├── .github/workflows/  CI running both test suites
 └── icons/
     ├── icon.svg        Source icon
     ├── icon16.png      Toolbar icon
@@ -239,6 +243,19 @@ Right-click the extension icon → **Options** (or use the ⚙ button in the pop
 For extra privacy, you can set site access to "on click":
 - Right-click the extension icon → "This can read and change site data" → "When you click the extension"
 - The extension will still work (fetches headers on demand via the rescan button), but won't capture headers passively in the background
+
+## Development
+
+```
+npm test            # unit tests, no install needed (Node 22+)
+npm install
+npx playwright install chromium
+npm run test:e2e    # browser tests against local test sites
+```
+
+The browser tests start local HTTPS/HTTP test sites on ports 8443 and 8080 (change with `E2E_HTTPS_PORT` / `E2E_HTTP_PORT`) and need `openssl` to create a throwaway certificate. Both suites run on every push through GitHub Actions.
+
+When packaging for the Chrome Web Store, zip only the extension files: leave out `tests/`, `package.json` and `.github/`.
 
 ## Browser Compatibility
 
