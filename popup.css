@@ -125,8 +125,8 @@ body::-webkit-scrollbar-thumb {
   flex: 1;
 }
 
-/* Theme toggle + rescan button shared styles */
-#rescan-btn, #theme-btn {
+/* Settings, theme toggle + rescan button shared styles */
+#rescan-btn, #theme-btn, #settings-btn {
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -142,7 +142,7 @@ body::-webkit-scrollbar-thumb {
   transition: background 0.15s, color 0.15s, transform 0.3s;
 }
 
-#rescan-btn:hover, #theme-btn:hover {
+#rescan-btn:hover, #theme-btn:hover, #settings-btn:hover {
   background: var(--bg-btn-hover);
   color: var(--text-secondary);
 }
@@ -315,14 +315,15 @@ body.theme-transition *::after {
 }
 
 /* Raw headers, animated */
-#raw-headers {
+/* Collapsible sections: raw headers and score breakdown */
+#raw-headers, #breakdown {
   max-height: 0;
   overflow: hidden;
   opacity: 0;
   transition: max-height 0.35s ease, opacity 0.3s ease;
 }
 
-#raw-headers.show {
+#raw-headers.show, #breakdown.show {
   max-height: 5000px;
   opacity: 1;
 }
@@ -921,8 +922,13 @@ body.light .header-item.warn .desc-verdict {
   transform: rotate(180deg);
 }
 
-#raw-headers.show {
+#raw-headers.show, #breakdown.show {
   margin-top: 8px;
+}
+
+/* The collapsed breakdown heading needs no space below it */
+#breakdown-toggle:not(.expanded) {
+  margin-bottom: 0;
 }
 
 .raw-row {
@@ -1188,4 +1194,124 @@ body.light .header-item.warn .desc-verdict {
   margin-top: 2px;
   letter-spacing: 0.02em;
   user-select: none;
+}
+
+#settings-btn {
+  font-size: 15px;
+}
+
+/* Keyboard focus: visible outline on every interactive element */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid #4c9aff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Visually hidden, still read by screen readers */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Score breakdown */
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.breakdown-table th,
+.breakdown-table td {
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--raw-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.breakdown-table th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.breakdown-table .bd-reason {
+  color: var(--text-muted);
+}
+
+.breakdown-table .bd-points {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown-table tr.earned .bd-points { color: #2ecc40; }
+.breakdown-table tr.missed .bd-points { color: #ff4136; }
+.breakdown-table tr.penalty .bd-points { color: #ff851b; }
+
+.breakdown-table tfoot th,
+.breakdown-table tfoot td {
+  border-bottom: none;
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.breakdown-scale {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+/* Redirect chain */
+.redirect-row {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--raw-border);
+  font-size: 12px;
+}
+
+.redirect-row:last-child {
+  border-bottom: none;
+}
+
+.redirect-status {
+  display: inline-block;
+  min-width: 34px;
+  margin-right: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--pill-bg);
+  color: var(--text-secondary);
+  font-weight: 700;
+  text-align: center;
+}
+
+.redirect-urls {
+  color: var(--text-body);
+  word-break: break-all;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.redirect-note {
+  margin: 3px 0 0 46px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Cookie values when blurring is turned off in the settings */
+.cookie-value-blurred.always-visible + .cookie-reveal-hint {
+  display: none;
+}
+
+.desc-verdict a {
+  color: #4c9aff;
 }

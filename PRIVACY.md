@@ -6,9 +6,11 @@
 
 - Reads HTTP response headers from websites you visit to evaluate their security configuration
 - Stores header data temporarily in your browser's session storage (cleared when the browser closes)
-- When the headers captured during page load are incomplete, re-requests the page you are viewing directly from that website, without cookies, to read its headers. This is never done for Incognito tabs
-- Only records the headers of top-level pages you open and of its own re-requests; images, scripts, and other resources loaded by pages are ignored
-- Saves your light/dark theme preference in local storage
+- When you open the popup for a page it has no data for, or press rescan, requests that page once directly from the website, without cookies, to read its headers
+- With "Re-check incomplete pages in the background" (on by default, can be turned off in the settings): when a page was loaded from the browser's cache, which doesn't keep the Strict-Transport-Security and Set-Cookie headers, requests it once more directly from the website, without cookies, unless it already saw the same page load from the network in this session. It also scans the tabs that are open when you install the extension. Pages loaded from the network are never requested again
+- Never re-requests pages opened in Incognito windows
+- Only records the headers of top-level pages you open (including redirects on the way) and of its own requests; images, scripts, and other resources loaded by pages are ignored
+- Saves your settings and light/dark theme preference in local storage
 
 ## What the extension does NOT do
 
@@ -23,12 +25,12 @@
 
 All data remains entirely on your device:
 
-- **Session storage**: captured HTTP headers per tab, automatically cleared when the browser session ends
-- **Local storage**: theme preference (light or dark) only
+- **Session storage**: captured HTTP headers per tab, and the Strict-Transport-Security and Set-Cookie headers of pages loaded from the network (never from Incognito tabs, at most 500 pages) so pages later served from the browser cache can be graded without a new request. Automatically cleared when the browser session ends
+- **Local storage**: your settings and theme preference (light or dark) only
 
 ## External links
 
-The extension provides optional buttons to scan a site on [SecurityHeaders.com](https://securityheaders.com/) and [SSL Labs](https://www.ssllabs.com/ssltest/). These open in a new tab and are initiated only by the user clicking the button. Only the page's address without its query string or fragment is passed to these services (and only the hostname to SSL Labs). No data is sent automatically.
+The extension provides optional buttons to scan a site on [SecurityHeaders.com](https://securityheaders.com/) and [SSL Labs](https://www.ssllabs.com/ssltest/). These open in a new tab and are initiated only by the user clicking the button. Only the page's address without its query string or fragment is passed to these services (and only the hostname to SSL Labs). The "Check status on hstspreload.org" link in the HSTS details works the same way and passes only the hostname. No data is sent automatically.
 
 ## Permissions
 
@@ -49,4 +51,4 @@ If you have questions about this privacy policy, please open an issue on the [Gi
 
 This privacy policy may be updated to reflect changes in the extension. Any updates will be posted to this file in the repository.
 
-*Last updated: September 24, 2026*
+*Last updated: September 25, 2026*

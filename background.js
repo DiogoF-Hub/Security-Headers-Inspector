@@ -1,6 +1,9 @@
 // MV3 service worker. webRequest observation is still available.
 // State is persisted via chrome.storage.session since service workers are ephemeral.
 
+// Header analysis and grading shared with the popup
+importScripts("analysis.js");
+
 // storage.session keeps its default TRUSTED_CONTEXTS access level: it holds captured
 // Set-Cookie values, and only extension pages (which are trusted) need to read it.
 
@@ -9,13 +12,31 @@ const EXTENSION_ORIGIN = new URL(chrome.runtime.getURL("")).origin;
 
 // Background fetches that never return headers must not hold a queue slot forever.
 const FETCH_TIMEOUT_MS = 10000;
+// How long to wait for webRequest to report the headers of our own fetch
+const CAPTURE_WAIT_MS = 2000;
+
+// --- Settings ---
+let settings = { ...DEFAULT_SETTINGS };
+const settingsReady = new Promise((resolve) => {
+  chrome.storage.local.get("settings", (result) => {
+    settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
+    resolve();
+  });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.settings) return;
+  const before = settings;
+  settings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue || {}) };
+  if (before.showBadge !== settings.showBadge) refreshAllBadges();
+});
 
 // --- Storage helpers ---
 // Service workers can go idle at any time, so tab state lives in storage.session.
 // We keep a local cache to avoid async reads on every webRequest event.
 let tabHeaders = {};
-// Headers captured from this extension's own fetch() calls. Only read ~150ms after the
-// fetch resolves, so it stays in memory and is never persisted.
+// Headers captured from this extension's own fetch() calls, keyed by URL. Only
+// needed until the fetch that caused them reads them, so never persisted.
 let fetchedHeaders = {};
 
 // Load state from storage on service worker startup. Entries captured before the
@@ -30,7 +51,7 @@ let saveTabHeadersTimer = null;
 function saveTabHeaders() {
   if (saveTabHeadersTimer) clearTimeout(saveTabHeadersTimer);
   saveTabHeadersTimer = setTimeout(() => {
-    chrome.storage.session.set({ tabHeaders });
+    saveSession({ tabHeaders });
     saveTabHeadersTimer = null;
   }, 300);
 }
@@ -38,11 +59,19 @@ function saveTabHeaders() {
 function saveTabHeadersNow() {
   if (saveTabHeadersTimer) clearTimeout(saveTabHeadersTimer);
   saveTabHeadersTimer = null;
-  chrome.storage.session.set({ tabHeaders });
+  saveSession({ tabHeaders });
 }
 
-// Prune stale fetchedHeaders entries via chrome.alarms (setInterval doesn't survive idle)
-chrome.alarms.create("prune-fetched-headers", { periodInMinutes: 1 });
+function saveSession(items) {
+  chrome.storage.session.set(items).catch((err) => console.warn("Could not save state:", err.message));
+}
+
+// Prune stale fetchedHeaders entries via chrome.alarms (setInterval doesn't survive idle).
+// Only create the alarm once: re-creating it on every service worker start would
+// restart its countdown, so it might never fire.
+chrome.alarms.get("prune-fetched-headers", (alarm) => {
+  if (!alarm) chrome.alarms.create("prune-fetched-headers", { periodInMinutes: 1 });
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "prune-fetched-headers") {
@@ -55,10 +84,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Show the grade on the toolbar badge. The tab may have closed by the time a
 // fetch finishes, so a rejected badge update is expected and ignored.
-function setBadge(tabId, headers) {
-  const grade = computeGrade(headers);
-  chrome.action.setBadgeText({ tabId, text: grade.letter }).catch(() => {});
-  chrome.action.setBadgeBackgroundColor({ tabId, color: grade.color }).catch(() => {});
+function setBadge(tabId, data) {
+  settingsReady.then(() => {
+    if (!settings.showBadge || !data || !data.headers) return;
+    const grade = computeGrade(data.headers, data.url);
+    chrome.action.setBadgeText({ tabId, text: grade.letter }).catch(() => {});
+    chrome.action.setBadgeBackgroundColor({ tabId, color: grade.color }).catch(() => {});
+  });
+}
+
+function clearBadge(tabId) {
+  chrome.action.setBadgeText({ tabId, text: "" }).catch(() => {});
+}
+
+function refreshAllBadges() {
+  for (const [id, data] of Object.entries(tabHeaders)) {
+    if (settings.showBadge) setBadge(Number(id), data);
+    else clearBadge(Number(id));
+  }
 }
 
 function sameOrigin(a, b) {
@@ -66,22 +109,6 @@ function sameOrigin(a, b) {
     return new URL(a).origin === new URL(b).origin;
   } catch {
     return false;
-  }
-}
-
-function isHttpUrl(url) {
-  return typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"));
-}
-
-// URL handed to external scanners. Drops credentials, query string and fragment,
-// which can carry tokens (reset links, OAuth codes) that shouldn't leave the browser.
-function scanTargetUrl(url) {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-    return u.origin + u.pathname;
-  } catch {
-    return null;
   }
 }
 
@@ -103,27 +130,93 @@ function restrictedError() {
   return err;
 }
 
+// --- Waiting for our own fetch's headers ---
+// webRequest reports the headers of our fetch() through a separate event, which can
+// arrive before or after fetch() resolves. Instead of sleeping a fixed time, each
+// fetch waits for a capture of its final URL that arrived after the fetch started.
+const captureWaiters = new Map(); // url -> Set of { since, resolve }
+
+function waitForCapture(url, since) {
+  const hit = fetchedHeaders[url];
+  if (hit && hit.timestamp >= since) return Promise.resolve(hit);
+  return new Promise((resolve) => {
+    const waiter = { since, resolve };
+    if (!captureWaiters.has(url)) captureWaiters.set(url, new Set());
+    captureWaiters.get(url).add(waiter);
+    setTimeout(() => {
+      const set = captureWaiters.get(url);
+      if (set && set.delete(waiter)) {
+        if (set.size === 0) captureWaiters.delete(url);
+        resolve(null);
+      }
+    }, CAPTURE_WAIT_MS);
+  });
+}
+
+function notifyCapture(url, data) {
+  const set = captureWaiters.get(url);
+  if (!set) return;
+  for (const waiter of set) {
+    if (data.timestamp >= waiter.since) {
+      set.delete(waiter);
+      waiter.resolve(data);
+    }
+  }
+  if (set.size === 0) captureWaiters.delete(url);
+}
+
 // Fetch a page from the service worker so webRequest can see its full header set.
 // Resolves with the Response and the headers webRequest captured for it; rejects
 // for pages the browser doesn't let extensions read.
+// Default (cors) mode on purpose: host permissions make every site readable, while
+// no-cors requests are blocked by Cross-Origin-Resource-Policy: same-origin.
+// The Accept header of a page navigation, so servers that vary on it answer with the
+// same response (and headers) as for the page itself.
+const NAVIGATION_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
 function fetchForHeaders(url) {
   if (isKnownRestricted(url)) return Promise.reject(restrictedError());
-  delete fetchedHeaders[url];
-  // Default (cors) mode on purpose: host permissions make every site readable, while
-  // no-cors requests are blocked by Cross-Origin-Resource-Policy: same-origin.
-  return fetch(url, { credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  const since = Date.now();
+  return fetch(url, { credentials: "omit", cache: "no-store", headers: { Accept: NAVIGATION_ACCEPT }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     .then((response) => {
       // Only the headers are needed, don't download the body
       if (response.body) response.body.cancel().catch(() => {});
-      return new Promise((resolve) => {
-        // Give webRequest listener time to store captured headers
-        setTimeout(() => {
-          // Prefer the final URL: after a redirect, fetchedHeaders[url] holds the 3xx hop
-          const webReqData = fetchedHeaders[response.url] || fetchedHeaders[url] || null;
-          resolve({ response, webReqData });
-        }, 150);
+      // response.url is the final URL after redirects
+      return waitForCapture(response.url, since).then((webReqData) => ({ response, webReqData }));
+    }, (err) => {
+      if (isTimeout(err)) throw err;
+      // webRequest reports network errors (site down, TLS error, blocked by another
+      // extension) of our own requests. Restricted pages are hidden from it, so when
+      // nothing was reported, the browser refused the request.
+      return waitForOwnFetchError(url, since).then((netError) => {
+        if (!netError) throw restrictedError();
+        const e = new Error(netError);
+        e.name = "NetworkError";
+        e.netError = netError;
+        throw e;
       });
     });
+}
+
+// Network errors webRequest reported for this extension's own requests
+const ownFetchErrors = []; // { url, error, time }
+
+function waitForOwnFetchError(url, since) {
+  const find = () => {
+    const recent = ownFetchErrors.filter(e => e.time >= since);
+    const match = recent.find(e => e.url === url) || recent[0];
+    return match ? match.error : null;
+  };
+  return new Promise((resolve) => {
+    let waited = 0;
+    const check = () => {
+      const error = find();
+      if (error || waited >= 500) return resolve(error);
+      waited += 50;
+      setTimeout(check, 50);
+    };
+    check();
+  });
 }
 
 // A timeout says nothing about whether the page is restricted, so don't flag it as such.
@@ -131,56 +224,214 @@ function isTimeout(err) {
   return err && (err.name === "TimeoutError" || err.name === "AbortError");
 }
 
+// Tab entry for a failed request: a network error, or a page hidden from extensions
+function failureEntry(err, url) {
+  return err && err.netError
+    ? { loadError: err.netError, url, timestamp: Date.now() }
+    : { restricted: true, url, timestamp: Date.now() };
+}
+
+// Responses that don't replace the page shown in the tab: nothing to show (204/205),
+// or a file the browser downloads instead of displaying.
+const RENDERED_APPLICATION_TYPES = ["application/xhtml+xml", "application/xml", "application/json", "application/pdf", "application/javascript", "application/ecmascript", "application/x-javascript"];
+
+function isNotShownAsPage(statusCode, headers) {
+  if (statusCode === 204 || statusCode === 205) return true;
+  if (/^\s*attachment/i.test(headers["content-disposition"] || "")) return true;
+  const type = (headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+  if (!type) return false;
+  const shown = /^(text|image|video|audio)\//.test(type) || /\+(xml|json)$/.test(type) || RENDERED_APPLICATION_TYPES.includes(type);
+  return !shown;
+}
+
+// Header value as text. Chrome gives values that aren't valid UTF-8 as bytes.
+function headerValue(header) {
+  if (typeof header.value === "string") return header.value;
+  return header.binaryValue ? String.fromCharCode(...header.binaryValue) : "";
+}
+
+// --- Capturing headers ---
+
+// Only two kinds of response are useful: top-level page loads in a tab, and
+// responses to this extension's own fetch() calls. Everything else (images,
+// XHRs, other extensions' requests) is skipped so their cookies and URLs
+// are never captured.
+function isPageLoad(details) {
+  return details.type === "main_frame" && details.tabId >= 0;
+}
+
+function isOwnFetch(details) {
+  return details.tabId === -1 && details.initiator === EXTENSION_ORIGIN;
+}
+
+// Redirect hops and cookies set along the way, per request, until the final response
+const redirectState = new Map(); // requestId -> { hops, cookies }
+
+function redirectStateFor(requestId) {
+  if (!redirectState.has(requestId)) redirectState.set(requestId, { hops: [], cookies: [] });
+  return redirectState.get(requestId);
+}
+
+chrome.webRequest.onBeforeRedirect.addListener(
+  (details) => {
+    if (!isPageLoad(details) && !isOwnFetch(details)) return;
+    const state = redirectStateFor(details.requestId);
+    if (state.hops.length >= 20) return;
+    const reasonHeader = (details.responseHeaders || []).find(h => h.name.toLowerCase() === "non-authoritative-reason");
+    state.hops.push({
+      from: details.url,
+      to: details.redirectUrl,
+      status: details.statusCode,
+      // Redirects Chrome makes itself (HSTS upgrades, HTTPS-Upgrades) are "Internal Redirect"s
+      internal: /internal redirect/i.test(details.statusLine || ""),
+      reason: reasonHeader ? reasonHeader.value : null
+    });
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"]
+);
+
+// The browser strips Strict-Transport-Security and Set-Cookie from responses it keeps
+// in its HTTP cache, so a page served from cache (or revalidated with a 304) arrives
+// here without them. Remember those headers from network responses in this session,
+// per URL, so a cached load of the same URL can be completed without a request.
+// Kept in storage.session too, since the service worker stops after ~30s idle.
+const networkSecurityHeaders = new Map(); // url -> { hsts, cookies }
+const MAX_REMEMBERED_URLS = 500;
+
+chrome.storage.session.get("networkSecurityHeaders", (result) => {
+  // Entries recorded before the read completed are newer, so they stay
+  for (const [url, value] of result.networkSecurityHeaders || []) {
+    if (!networkSecurityHeaders.has(url)) networkSecurityHeaders.set(url, value);
+  }
+});
+
+let saveNetworkHeadersTimer = null;
+function rememberNetworkHeaders(url, data) {
+  networkSecurityHeaders.delete(url);
+  // Cap the cookie data kept per page: session storage is limited to 10 MB in total
+  const cookies = (data.cookies || []).slice(0, 30).filter(c => c.length <= 4096);
+  networkSecurityHeaders.set(url, { hsts: data.headers["strict-transport-security"] || null, cookies });
+  if (networkSecurityHeaders.size > MAX_REMEMBERED_URLS) {
+    networkSecurityHeaders.delete(networkSecurityHeaders.keys().next().value);
+  }
+  clearTimeout(saveNetworkHeadersTimer);
+  saveNetworkHeadersTimer = setTimeout(() => {
+    saveSession({ networkSecurityHeaders: [...networkSecurityHeaders] });
+  }, 300);
+}
+
+// onResponseStarted is the first event that says whether the page came from cache
+chrome.webRequest.onResponseStarted.addListener(
+  (details) => {
+    if (!isPageLoad(details)) return;
+    const entry = tabHeaders[details.tabId];
+    if (!entry || !entry.headers || entry.url !== details.url) return;
+    if (!details.fromCache) {
+      // Never keep anything from Incognito tabs beyond the tab's own lifetime
+      const snapshot = { headers: { ...entry.headers }, cookies: [...entry.cookies] };
+      chrome.tabs.get(details.tabId, (tab) => {
+        if (!chrome.runtime.lastError && tab && !tab.incognito) rememberNetworkHeaders(details.url, snapshot);
+      });
+      return;
+    }
+    const known = networkSecurityHeaders.get(details.url);
+    if (known) {
+      if (known.hsts && !entry.headers["strict-transport-security"]) entry.headers["strict-transport-security"] = known.hsts;
+      if (entry.cookies.length === 0 && known.cookies.length > 0) entry.cookies = known.cookies;
+      delete entry.cacheIncomplete;
+    } else {
+      // Not seen from the network yet: HSTS and cookies are unknown until re-checked
+      entry.cacheIncomplete = true;
+    }
+    setBadge(details.tabId, entry);
+    saveTabHeaders();
+  },
+  { urls: ["<all_urls>"], types: ["main_frame"] }
+);
+
+chrome.webRequest.onCompleted.addListener((details) => redirectState.delete(details.requestId), { urls: ["<all_urls>"] });
+
+chrome.webRequest.onErrorOccurred.addListener(
+  (details) => {
+    redirectState.delete(details.requestId);
+    if (isOwnFetch(details)) {
+      ownFetchErrors.push({ url: details.url, error: details.error, time: Date.now() });
+      if (ownFetchErrors.length > 50) ownFetchErrors.shift();
+      return;
+    }
+    // ERR_ABORTED: the user stopped the load or navigated elsewhere, not a failure
+    if (!isPageLoad(details) || details.error === "net::ERR_ABORTED") return;
+    const entry = tabHeaders[details.tabId];
+    // The headers of this very request already arrived: the page itself is fine
+    if (entry && entry.headers && entry.requestId === details.requestId) return;
+    tabHeaders[details.tabId] = { loadError: details.error, url: details.url, timestamp: Date.now() };
+    clearBadge(details.tabId);
+    saveTabHeaders();
+  },
+  { urls: ["<all_urls>"] }
+);
+
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    // Only two kinds of response are useful: top-level page loads in a tab, and
-    // responses to this extension's own fetch() calls. Everything else (images,
-    // XHRs, other extensions' requests) is skipped so their cookies and URLs
-    // are never captured.
-    const isPageLoad = details.type === "main_frame" && details.tabId >= 0;
-    const isOwnFetch = details.tabId === -1 && details.initiator === EXTENSION_ORIGIN;
-    if (!isPageLoad && !isOwnFetch) return;
+    const pageLoad = isPageLoad(details);
+    if (!pageLoad && !isOwnFetch(details)) return;
 
     // Object.create(null) avoids prototype pollution if a server sends a header
-    // named __proto__ or constructor — those would mutate a regular object's prototype.
+    // named __proto__ or constructor, which would mutate a regular object's prototype.
     const headers = Object.create(null);
     const cookies = [];
     for (const header of details.responseHeaders) {
       const name = header.name.toLowerCase();
+      const value = headerValue(header);
       if (name === "set-cookie") {
-        cookies.push(header.value);
+        cookies.push(value);
       }
-      headers[name] = header.value;
+      headers[name] = value;
     }
 
+    // A redirect is not the page: remember its cookies (a login often sets the
+    // session cookie on a 302) and wait for the final response.
+    if (details.statusCode >= 300 && details.statusCode < 400 && details.statusCode !== 304) {
+      redirectStateFor(details.requestId).cookies.push(...cookies);
+      return;
+    }
+
+    // A download or an empty response: the tab keeps showing the current page
+    if (pageLoad && isNotShownAsPage(details.statusCode, headers)) return;
+
+    const state = redirectState.get(details.requestId);
     const data = {
       url: details.url,
+      requestId: details.requestId,
       statusCode: details.statusCode,
       headers: headers,
-      cookies: cookies,
+      cookies: state ? state.cookies.concat(cookies) : cookies,
+      redirects: state ? state.hops : [],
       timestamp: Date.now()
     };
 
-    if (isPageLoad) {
-      if (details.statusCode === 304 && tabHeaders[details.tabId] && tabHeaders[details.tabId].headers) {
+    if (pageLoad) {
+      const existing = tabHeaders[details.tabId];
+      if (details.statusCode === 304 && existing && existing.headers) {
         // 304 Not Modified, server sends minimal headers.
         // Keep the existing full header set, just update the timestamp.
-        tabHeaders[details.tabId].timestamp = Date.now();
+        existing.timestamp = Date.now();
       } else {
         // Full response, store all headers
         // Preserve cookies from previous load if server didn't send new ones
-        if (cookies.length === 0 && tabHeaders[details.tabId] && tabHeaders[details.tabId].cookies && tabHeaders[details.tabId].cookies.length > 0) {
-          data.cookies = tabHeaders[details.tabId].cookies;
+        if (data.cookies.length === 0 && existing && existing.cookies && existing.cookies.length > 0) {
+          data.cookies = existing.cookies;
         }
         tabHeaders[details.tabId] = data;
       }
 
-      setBadge(details.tabId, tabHeaders[details.tabId].headers);
-
+      setBadge(details.tabId, tabHeaders[details.tabId]);
       saveTabHeaders();
     } else {
       // A fetch from this service worker, store by URL
       fetchedHeaders[details.url] = data;
+      notifyCapture(details.url, data);
     }
   },
   { urls: ["<all_urls>"] },
@@ -214,13 +465,12 @@ function scanTab(tab) {
         if (!headers[name.toLowerCase()]) headers[name.toLowerCase()] = value;
       });
 
-      const cookies = (webReqData && webReqData.cookies) ? webReqData.cookies : [];
-
       const data = {
         url: finalUrl,
         statusCode: response.status,
         headers: headers,
-        cookies: cookies,
+        cookies: (webReqData && webReqData.cookies) ? webReqData.cookies : [],
+        redirects: (webReqData && webReqData.redirects) ? webReqData.redirects : [],
         timestamp: Date.now(),
         supplemented: true
       };
@@ -228,13 +478,14 @@ function scanTab(tab) {
       tabHeaders[tab.id] = data;
       saveTabHeaders();
 
-      setBadge(tab.id, headers);
+      setBadge(tab.id, data);
     })
     .catch((err) => {
-      // Fetch blocked (CORS, restricted domain, etc.), mark tab so popup can show why
+      // Network error or restricted page: mark the tab so the popup can show why
       if (!isTimeout(err) && !tabHeaders[tab.id]) {
-        tabHeaders[tab.id] = { restricted: true, url: url, timestamp: Date.now() };
+        tabHeaders[tab.id] = failureEntry(err, url);
         saveTabHeaders();
+        clearBadge(tab.id);
       }
     });
 }
@@ -243,27 +494,32 @@ function scanTab(tab) {
 const SCAN_BATCH_SIZE = 3;
 const SCAN_BATCH_DELAY = 500; // ms between batches
 
+// Only when background re-checks are turned on in the settings
 function scanAllTabs() {
-  chrome.tabs.query({}, (tabs) => {
-    const queue = tabs.filter(tab => isHttpUrl(tab.url) && !tab.incognito && !tabHeaders[tab.id]);
-
-    function processNext(i) {
-      if (i >= queue.length) return;
-      const batch = queue.slice(i, i + SCAN_BATCH_SIZE);
-      for (const tab of batch) {
-        scanTab(tab);
-      }
-      setTimeout(() => processNext(i + SCAN_BATCH_SIZE), SCAN_BATCH_DELAY);
-    }
-
-    processNext(0);
+  settingsReady.then(() => {
+    if (settings.autoFetch) chrome.tabs.query({}, scanTabsInBatches);
   });
 }
 
-chrome.runtime.onInstalled.addListener((details) => {
-  scanAllTabs();
+function scanTabsInBatches(tabs) {
+  const queue = tabs.filter(tab => isHttpUrl(tab.url) && !tab.incognito && !tabHeaders[tab.id]);
 
+  function processNext(i) {
+    if (i >= queue.length) return;
+    const batch = queue.slice(i, i + SCAN_BATCH_SIZE);
+    for (const tab of batch) {
+      scanTab(tab);
+    }
+    setTimeout(() => processNext(i + SCAN_BATCH_SIZE), SCAN_BATCH_DELAY);
+  }
+
+  processNext(0);
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
+    // Tabs that were open before the extension existed have no captured headers
+    scanAllTabs();
     chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
   }
 
@@ -300,45 +556,58 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-chrome.runtime.onStartup.addListener(scanAllTabs);
 
 // Check if captured data looks incomplete
-function needsSupplementaryFetch(tabId, url) {
+// Only re-check when the captured data is really incomplete: nothing was captured,
+// or the page came from the browser cache (which drops HSTS and Set-Cookie). A page
+// loaded from the network is complete, even if it has no HSTS.
+function needsSupplementaryFetch(tabId) {
   const data = tabHeaders[tabId];
-  if (data && data.restricted) return false; // Already tried and failed
+  if (data && (data.restricted || data.loadError)) return false; // Already tried and failed
   // Already re-requested once for this page load. Without this, every in-page
-  // navigation (hash change, SPA route change) on an HTTPS site without HSTS
-  // would send another request to the site.
+  // navigation (hash change, SPA route change) would send another request.
   if (data && data.supplemented) return false;
   if (!data || !data.headers) return true;
-  if (url.startsWith("https://")) {
-    const h = data.headers;
-    const headerCount = Object.keys(h).length;
-    if (headerCount < 5) return true;
-    if (!h["strict-transport-security"]) return true;
-  }
-  return false;
+  return !!data.cacheIncomplete;
 }
 
+// Headers the browser drops from responses it keeps in its HTTP cache
+const HEADERS_DROPPED_BY_CACHE = ["strict-transport-security", "public-key-pins", "public-key-pins-report-only"];
+
+const withoutFragment = (url) => (url || "").split("#")[0];
+
 // Merge headers from a supplementary fetch into existing tab data.
-function mergeSupplementaryData(tabId, webReqData) {
+function mergeSupplementaryData(tabId, webReqData, requestedUrl) {
   if (!webReqData || !webReqData.headers) return;
+  // Our fetch skips the cache, so its headers are complete
+  rememberNetworkHeaders(webReqData.url, webReqData);
 
   const existing = tabHeaders[tabId];
   if (existing && existing.headers) {
+    // The tab may have loaded another page of the same site in the meantime
+    if (existing.url !== webReqData.url && withoutFragment(existing.url) !== withoutFragment(requestedUrl)) return;
     let changed = false;
-    for (const [name, value] of Object.entries(webReqData.headers)) {
-      if (!existing.headers[name]) {
-        existing.headers[name] = value;
+    if (existing.cacheIncomplete) {
+      delete existing.cacheIncomplete;
+      changed = true;
+    }
+    // Only fill in what the cache dropped: the page's own response is the reference
+    for (const name of HEADERS_DROPPED_BY_CACHE) {
+      if (webReqData.headers[name] && !existing.headers[name]) {
+        existing.headers[name] = webReqData.headers[name];
         changed = true;
       }
+    }
+    if ((!existing.redirects || existing.redirects.length === 0) && webReqData.redirects && webReqData.redirects.length > 0) {
+      existing.redirects = webReqData.redirects;
+      changed = true;
     }
     if (webReqData.cookies && webReqData.cookies.length > 0 && (!existing.cookies || existing.cookies.length === 0)) {
       existing.cookies = webReqData.cookies;
       changed = true;
     }
     if (changed) {
-      setBadge(tabId, existing.headers);
+      setBadge(tabId, existing);
       saveTabHeaders();
     }
   } else {
@@ -347,10 +616,11 @@ function mergeSupplementaryData(tabId, webReqData) {
       statusCode: webReqData.statusCode,
       headers: Object.assign(Object.create(null), webReqData.headers),
       cookies: webReqData.cookies || [],
+      redirects: webReqData.redirects || [],
       timestamp: Date.now(),
       supplemented: true
     };
-    setBadge(tabId, tabHeaders[tabId].headers);
+    setBadge(tabId, tabHeaders[tabId]);
     saveTabHeaders();
   }
 }
@@ -388,14 +658,16 @@ function drainSupplementaryQueue() {
     fetchForHeaders(url)
       .then(({ webReqData }) => {
         if (!webReqData) return;
-        ifTabStillAt(tabId, url, () => mergeSupplementaryData(tabId, webReqData));
+        ifTabStillAt(tabId, url, () => mergeSupplementaryData(tabId, webReqData, url));
       })
       .catch((err) => {
         if (isTimeout(err)) return;
         if (!tabHeaders[tabId] || !tabHeaders[tabId].headers) {
           ifTabStillAt(tabId, url, () => {
-            tabHeaders[tabId] = { restricted: true, url: url, timestamp: Date.now() };
+            if (tabHeaders[tabId] && (tabHeaders[tabId].headers || tabHeaders[tabId].loadError)) return;
+            tabHeaders[tabId] = failureEntry(err, url);
             saveTabHeaders();
+            clearBadge(tabId);
           });
         }
       })
@@ -417,19 +689,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const old = tabHeaders[tabId];
     if (old && old.url && !sameOrigin(old.url, changeInfo.url)) {
       delete tabHeaders[tabId];
-      chrome.action.setBadgeText({ tabId: tabId, text: "" }).catch(() => {});
+      clearBadge(tabId);
       saveTabHeaders();
     }
   }
 
   if (changeInfo.status === "complete") {
     if (tabHeaders[tabId] && tabHeaders[tabId].headers) {
-      setBadge(tabId, tabHeaders[tabId].headers);
+      setBadge(tabId, tabHeaders[tabId]);
     }
 
-    if (isHttpUrl(tab.url) && !tab.incognito && needsSupplementaryFetch(tabId, tab.url)) {
-      enqueueSupplementaryFetch(tabId, tab.url);
-    }
+    // Automatic re-requests only when turned on in the settings
+    settingsReady.then(() => {
+      if (settings.autoFetch && isHttpUrl(tab.url) && !tab.incognito && needsSupplementaryFetch(tabId)) {
+        enqueueSupplementaryFetch(tabId, tab.url);
+      }
+    });
   }
 });
 
@@ -449,8 +724,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Fetch the URL the tab is actually showing, never a URL supplied by the caller,
     // so this can't be used to make the extension request arbitrary addresses.
     chrome.tabs.get(tabId, (tab) => {
-      if (chrome.runtime.lastError || !tab || !isHttpUrl(tab.url) || tab.incognito) {
+      if (chrome.runtime.lastError || !tab || !isHttpUrl(tab.url)) {
         sendResponse(tabHeaders[tabId] || null);
+        return;
+      }
+      if (tab.incognito) {
+        // Never re-requested (see scanTab); say so, so the popup doesn't suggest a rescan
+        const entry = tabHeaders[tabId];
+        sendResponse(entry ? { ...entry, incognitoNoRecheck: true } : null);
         return;
       }
       const url = tab.url;
@@ -459,33 +740,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(({ webReqData }) => {
           const result = webReqData;
 
+          const existing = tabHeaders[tabId];
           if (result && result.headers) {
-            const existing = tabHeaders[tabId];
+            // Our fetch skips the cache, so its headers are complete
+            rememberNetworkHeaders(result.url, result);
             if (existing && existing.headers) {
-              // Merge: new headers win, but keep any existing ones the new fetch missed
-              result.headers = Object.assign(Object.create(null), existing.headers, result.headers);
+              // The fresh headers replace the old ones, so a header the site stopped
+              // sending disappears. Our request carries no cookies, so the site may not
+              // set any: keep the ones from the page load.
               if ((!result.cookies || result.cookies.length === 0) && existing.cookies && existing.cookies.length > 0) {
                 result.cookies = existing.cookies;
               }
+              // The page load's redirect chain says more than the one from our fetch
+              if (existing.redirects && existing.redirects.length > 0) result.redirects = existing.redirects;
             }
             result.supplemented = true;
             tabHeaders[tabId] = result;
             saveTabHeadersNow();
 
-            setBadge(tabId, result.headers);
-          }
-
-          sendResponse(result || tabHeaders[tabId] || null);
-        })
-        .catch((err) => {
-          if (isTimeout(err)) {
-            sendResponse(tabHeaders[tabId] || null);
+            setBadge(tabId, result);
+            sendResponse(result);
             return;
           }
-          const restricted = { restricted: true, url: url, timestamp: Date.now() };
-          tabHeaders[tabId] = restricted;
+
+          // The request worked but its headers never reached webRequest
+          sendResponse(existing && existing.headers ? { ...existing, rescanFailed: "no headers received" } : (existing || null));
+        })
+        .catch((err) => {
+          const existing = tabHeaders[tabId];
+          // Headers captured while the page loaded prove the page isn't restricted, so a
+          // failed rescan (network error, blocked request, timeout) keeps them.
+          if (existing && existing.headers) {
+            sendResponse({ ...existing, rescanFailed: err.netError || (isTimeout(err) ? "timed out" : "request blocked") });
+            return;
+          }
+          if (isTimeout(err)) {
+            sendResponse(existing || null);
+            return;
+          }
+          const failure = failureEntry(err, url);
+          tabHeaders[tabId] = failure;
           saveTabHeaders();
-          sendResponse(restricted);
+          clearBadge(tabId);
+          sendResponse(failure);
         });
     });
 
@@ -493,114 +790,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Security headers we evaluate
-const SECURITY_HEADERS = [
-  "content-security-policy",
-  "permissions-policy",
-  "referrer-policy",
-  "strict-transport-security",
-  "x-content-type-options",
-  "x-frame-options"
-];
-
-// Weighted scoring matching securityheaders.com methodology
-const HEADER_WEIGHTS = {
-  "content-security-policy":   25,
-  "strict-transport-security": 25,
-  "x-frame-options":           20,
-  "x-content-type-options":    20,
-  "referrer-policy":           15,
-  "permissions-policy":        15
-};
-const MAX_SCORE = 120;
-
-// Parse a CSP header into { directive: [sources] } the way browsers read it:
-// directive names and keywords are case-insensitive, and when a directive is
-// repeated only the first occurrence counts. Without this, a policy like
-// "script-src 'unsafe-inline'; script-src 'self'" would be graded as safe.
-// Object.create(null) prevents a CSP directive named __proto__ from mutating the prototype.
-// IMPORTANT: keep in sync with the identical function in popup.js
-function parseCSP(csp) {
-  const directives = Object.create(null);
-  for (const d of csp.toLowerCase().split(";")) {
-    const parts = d.trim().split(/\s+/);
-    if (!parts[0] || parts[0] in directives) continue;
-    directives[parts[0]] = parts.slice(1);
-  }
-  return directives;
-}
-
-// HSTS max-age in seconds, or null when there is no valid max-age.
-// Directive names are case-insensitive and the value may be quoted (RFC 6797).
-// IMPORTANT: keep in sync with the identical function in popup.js
-function hstsMaxAge(val) {
-  if (!val) return null;
-  const m = val.match(/max-age\s*=\s*"?(\d+)/i);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-// Whether a scored header actually protects the page. HSTS with max-age=0 tells
-// browsers to delete the policy, and one without max-age is ignored, so neither
-// counts. CSP frame-ancestors stands in for a missing X-Frame-Options.
-// IMPORTANT: keep in sync with the identical function in popup.js
-function countsAsPresent(h, headers) {
-  if (h === "strict-transport-security") return hstsMaxAge(headers[h]) > 0;
-  if (h === "x-frame-options" && !headers[h]) return "frame-ancestors" in parseCSP(headers["content-security-policy"] || "");
-  return !!headers[h];
-}
-
-// CSP quality penalty: caps score if script-src has unsafe-inline/unsafe-eval
-function applyCSPPenalty(csp, score) {
-  if (!csp) return score;
-  const directives = parseCSP(csp);
-  const scriptSrc = directives["script-src"] || directives["default-src"] || [];
-  const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
-  const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
-  const hasHash = scriptSrc.some(s => /^'sha(256|384|512)-/.test(s));
-
-  if (scriptSrc.includes("'unsafe-inline'") && !hasStrictDynamic && !hasNonce && !hasHash) {
-    score = Math.min(score, MAX_SCORE * 0.82);
-  }
-  if (scriptSrc.some(s => s === "'unsafe-eval'")) {
-    score = Math.min(score, MAX_SCORE * 0.82);
-  }
-  return score;
-}
-
-function computeGrade(headers) {
-  const csp = headers["content-security-policy"] || "";
-
-  let score = 0;
-  let present = 0;
-  const total = SECURITY_HEADERS.length;
-
-  for (const h of SECURITY_HEADERS) {
-    if (countsAsPresent(h, headers)) {
-      score += HEADER_WEIGHTS[h] || 0;
-      present++;
-    }
-  }
-
-  score = applyCSPPenalty(csp, score);
-
-  const pct = (score / MAX_SCORE) * 100;
-  let letter, color;
-
-  if (pct >= 95) {
-    letter = "A+"; color = "#4ec83d";
-  } else if (pct >= 75) {
-    letter = "A"; color = "#41a832";
-  } else if (pct >= 60) {
-    letter = "B"; color = "#ffd242";
-  } else if (pct >= 50) {
-    letter = "C"; color = "#ffd242";
-  } else if (pct >= 15) {
-    letter = "D"; color = "#ffa500";
-  } else if (pct >= 5) {
-    letter = "E"; color = "#ffa500";
-  } else {
-    letter = "F"; color = "#ff0000";
-  }
-
-  return { letter, color, present, total, score, pct };
-}

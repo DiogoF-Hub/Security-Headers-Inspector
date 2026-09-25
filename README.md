@@ -8,8 +8,9 @@ A Chromium browser extension (Manifest V3) that checks the security headers of a
 
 Every website you visit automatically gets a **letter grade** (A+ through F) displayed on the extension badge. Click the icon for the full report:
 
-- **Letter grade** with weighted scoring matching securityheaders.com methodology
-- **Score percentage** showing how the grade was calculated
+- **Letter grade** with weighted scoring based on the securityheaders.com methodology, counting only header values browsers actually apply
+- **Score breakdown** showing the points each header earned or lost, and why, plus any CSP penalty
+- **Redirect chain** of the page load (for example `http → https → www`), including upgrades the browser made itself because of HSTS
 - **Quick status pills** for an at-a-glance view of which core headers are present or missing
 - **Detailed expandable cards** for each header with:
   - Current value (or "Not set")
@@ -17,8 +18,9 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
   - "What is this?" plain-English explanation
   - "Why it matters" security implications
   - "Recommendation" what value to set
-- **Deep CSP analysis** that flags wildcards, `data:` URIs, `http:` sources, missing `default-src`/`object-src`/`base-uri`, and correctly handles `strict-dynamic`/nonce/hash negation of `unsafe-inline`
-- **Cookie security analysis** checking each `Set-Cookie` for `Secure`, `HttpOnly`, `SameSite`, and `__Secure-`/`__Host-` prefix
+- **Deep CSP analysis** that flags `unsafe-inline`/`unsafe-eval` (in `script-src` and `script-src-elem`), `unsafe-hashes`, wildcards, `data:` URIs, `http:` sources, missing `default-src`/`object-src`/`base-uri`, correctly handles `strict-dynamic`/nonce/hash negation of `unsafe-inline`, suggests `frame-ancestors`, `form-action`, `upgrade-insecure-requests` and Trusted Types, and points out a `Report-Only` policy that doesn't block anything
+- **HSTS preload check** showing whether the header meets the preload list requirements, with a link to hstspreload.org
+- **Cookie security analysis** checking each `Set-Cookie` for `Secure`, `HttpOnly`, `SameSite`, `Partitioned`, and `__Secure-`/`__Host-` prefix rules, and flagging cookies browsers reject. Cookies set on redirects (common on login) are included
 - **Information disclosure detection** flagging headers that leak server versions, frameworks, or debug info
 - **Deprecated header detection** identifying headers that are no longer useful (Expect-CT, HPKP, etc.)
 - **Color-coded raw headers** with security headers in green, info disclosure in amber, deprecated in purple, and good security tokens highlighted in bold
@@ -26,6 +28,8 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 - **External scan shortcuts** with buttons and right-click menu to scan on SecurityHeaders.com and SSL Labs
 - **Internal page detection** showing a friendly message on `chrome://`, `about:`, extension pages, etc.
 - **Restricted page detection** that automatically detects pages Chromium blocks extensions from inspecting, with a "Why?" explainer and external scan buttons
+- **Settings page** to turn background re-checks, the toolbar badge, and cookie value blurring on or off
+- **Keyboard and screen reader support**: every expandable card and toggle works with Tab, Enter and Space, with proper ARIA labels
 
 ## Headers Evaluated
 
@@ -40,7 +44,7 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 | **Referrer-Policy** | Controls how much referrer info leaks to other sites |
 | **Permissions-Policy** | Controls which browser features (camera, mic, etc.) are allowed |
 
-> **Note:** CSP's `frame-ancestors` directive counts as an X-Frame-Options equivalent for grading purposes, matching securityheaders.com behavior.
+> **Note:** CSP's `frame-ancestors` directive counts as an X-Frame-Options equivalent for grading purposes, matching securityheaders.com behavior. Browsers use `frame-ancestors` instead of X-Frame-Options when both are set, so a `frame-ancestors *` policy means no clickjacking protection even with `X-Frame-Options: DENY`.
 
 ### Additional Headers (informational, no grade impact)
 
@@ -85,11 +89,14 @@ Each `Set-Cookie` header is analyzed for:
 | **Secure** | Cookie only sent over HTTPS |
 | **HttpOnly** | Cookie inaccessible to JavaScript (`document.cookie`) |
 | **SameSite** | Controls cross-site cookie behavior (CSRF protection) |
-| **`__Secure-`/`__Host-` prefix** | Browser-enforced constraints on cookie scope |
+| **`__Secure-`/`__Host-` prefix** | Browser-enforced constraints on cookie scope (`__Host-` needs `Secure`, `Path=/` and no `Domain`) |
+| **Partitioned** | Cookie kept separate per top-level site (CHIPS); needs `Secure` |
+
+Cookies that break these rules (for example `SameSite=None` without `Secure`) are flagged as rejected: the browser never stores them.
 
 ## Grading System
 
-Grading uses weighted per-header scores matching securityheaders.com methodology:
+Grading uses weighted per-header scores based on the securityheaders.com methodology:
 
 | Header | Weight |
 |--------|--------|
@@ -101,7 +108,18 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 | Permissions-Policy | 15 |
 | **Total** | **120** |
 
-**CSP quality penalties:** If `script-src` contains `unsafe-inline` (without `strict-dynamic`/nonce/hash to negate it) or `unsafe-eval`, the effective score is capped at 82%, preventing an A+ grade even with all headers present.
+**CSP quality penalties:** If `script-src` (or `script-src-elem`) contains `unsafe-inline` (without `strict-dynamic`/nonce/hash to negate it) or `unsafe-eval`, the effective score is capped at 82%, preventing an A+ grade even with all headers present.
+
+**Only values browsers apply earn points.** Since 2.0, a header that is present but ignored by browsers scores 0, so the grade can be stricter than securityheaders.com:
+
+| Header | Earns no points when |
+|--------|----------------------|
+| Content-Security-Policy | It contains no directives |
+| Strict-Transport-Security | It has no valid `max-age`, `max-age=0` (which switches HSTS off), or it's sent over plain HTTP (browsers ignore it there) |
+| X-Frame-Options | The value isn't `DENY` or `SAMEORIGIN` (for example the obsolete `ALLOW-FROM`), or CSP `frame-ancestors` allows any site |
+| X-Content-Type-Options | The first value isn't `nosniff` |
+| Referrer-Policy | No recognized value, or the effective value is `unsafe-url` or `no-referrer-when-downgrade` (both send full URLs to other sites). With a list, the last recognized value is used, as in browsers |
+| Permissions-Policy | It has a syntax error (for example features separated by spaces instead of commas), which makes browsers ignore the whole header, or no feature has an allowlist like `camera=()` |
 
 | Grade | Score % |
 |-------|---------|
@@ -126,6 +144,7 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 │  (background.js, MV3 service worker)                    │
 │         │                                               │
 │         ├── Captures ALL response headers (incl. HSTS)  │
+│         ├── Records redirects and cookies set on them   │
 │         ├── Stores in chrome.storage.session by tab ID  │
 │         ├── Collects Set-Cookie into separate array     │
 │         ├── Handles 304 Not Modified (preserves cache)  │
@@ -143,34 +162,47 @@ Grading uses weighted per-header scores matching securityheaders.com methodology
 └─────────────────────────────────────────────────────────┘
 ```
 
-1. **Service worker** (`background.js`), the MV3 background script:
-   - Listens to `webRequest.onHeadersReceived` with `extraHeaders` on every request
+1. **Shared analysis** (`analysis.js`), loaded by the service worker, the popup, and the tests:
+   - Header definitions and evaluation, CSP parsing, cookie analysis, and grading
+   - Keeps the badge, the popup, and the tests grading exactly the same way
+
+2. **Service worker** (`background.js`), the MV3 background script:
+   - Listens to `webRequest.onHeadersReceived` with `extraHeaders`, but only keeps top-level page loads and the extension's own requests (never images, scripts or API calls)
    - Captures ALL response headers (including HSTS and Set-Cookie) and stores them via `chrome.storage.session`
+   - Records the redirect chain with `webRequest.onBeforeRedirect`, including cookies set on redirects
    - Keeps a local in-memory cache synced to storage for fast access
    - Preserves cached headers on 304 Not Modified responses
    - Computes weighted grade and updates the extension badge per tab
    - Re-applies badge on `tabs.onUpdated` (browsers clear per-tab badges on navigation)
-   - Auto-scans all existing tabs on startup/install
-   - Handles `fetchHeaders` messages from the popup for on-demand scanning
+   - Knows when a page came from the browser cache (`webRequest.onResponseStarted`), which drops `Strict-Transport-Security` and `Set-Cookie`. It fills them in from an earlier network load of the same URL in this session, or else re-checks the page once (if enabled in the settings, never for Incognito tabs)
+   - Scans the tabs that are open when the extension is installed (if enabled in the settings)
+   - Handles `fetchHeaders` messages from the popup for on-demand scanning, always using the tab's own URL
+   - Waits for webRequest to report the headers of its own requests instead of guessing a delay
    - Provides right-click context menu for external scans
    - Uses `chrome.alarms` for periodic cleanup (service worker timers don't persist)
 
-2. **Popup** (`popup.html`, `popup.css`, `popup.js`), the UI:
+3. **Popup** (`popup.html`, `popup.css`, `popup.js`), the UI:
    - Requests cached headers from background, falls back to fresh fetch if needed
-   - Evaluates each header with detailed analysis (CSP directive parsing, cookie flag checking, etc.)
-   - Renders grade, pills, expandable detail cards, cookie analysis, disclosure/deprecated warnings
+   - Renders grade, score breakdown, redirect chain, pills, expandable detail cards, cookie analysis, disclosure/deprecated warnings
    - Color-codes raw headers by category with highlighted good security tokens
    - Detects non-HTTP pages (`chrome://`, `about:`, `file://`, extensions)
+
+4. **Settings page** (`options.html`, `options.css`, `options.js`), saved in `chrome.storage.local`
 
 ### File Structure
 
 ```
 Security-Headers-Inspector/
 ├── manifest.json       Manifest V3 config
-├── background.js       Service worker (webRequest + storage.session + grading)
+├── analysis.js         Header evaluation, cookie analysis and grading (shared)
+├── background.js       Service worker (webRequest + storage.session)
 ├── popup.html          Popup markup
 ├── popup.css           Popup styles (dark/light theme)
-├── popup.js            Header evaluation logic + UI rendering
+├── popup.js            Popup UI rendering
+├── options.html        Settings page
+├── options.css         Settings page styles
+├── options.js          Settings page logic
+├── welcome.html/.css   First-install welcome page
 └── icons/
     ├── icon.svg        Source icon
     ├── icon16.png      Toolbar icon
@@ -191,6 +223,16 @@ Security-Headers-Inspector/
 3. Click **Load unpacked**
 4. Select the extension folder
 5. Visit any website, the badge shows the grade instantly. Click for the full report
+
+### Settings
+
+Right-click the extension icon → **Options** (or use the ⚙ button in the popup):
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| Re-check incomplete pages in the background | On | Browsers don't keep `Strict-Transport-Security` and `Set-Cookie` in their cache, so a page loaded from cache looks like it's missing them. The extension then requests the page once more (without cookies), unless it already saw the same page load from the network in this session. Also scans the tabs open at install. Pages loaded from the network are never re-requested. When off, the toolbar grade can be wrong for cached pages; the popup still re-checks when you open it |
+| Blur cookie values in the popup | On | Cookie values stay blurred until you click them |
+| Show the grade on the toolbar icon | On | Letter grade badge on the extension icon |
 
 ### Optional: Restrict Site Access
 
@@ -216,7 +258,7 @@ Some pages cannot be scanned by any browser extension. Chromium has a hardcoded 
 
 On these pages, the `webRequest` API (which captures headers during navigation) doesn't report anything to extensions, and extensions aren't allowed to read the response of their own `fetch` requests. This is not caused by any HTTP header or server configuration. It's a security boundary enforced by the browser itself. Administrators can also protect extra sites through browser policy.
 
-The extension recognizes the Chrome Web Store without making any request. Any other protected page (for example one blocked by browser policy) is detected when its request fails.
+The extension recognizes the Chrome Web Store without making any request. Any other protected page (for example one blocked by browser policy) is detected when its request fails; Chromium logs a CORS error in the extension's console for those. A page the extension saw loading is never reported as restricted: if a rescan fails there, the popup keeps showing the last result. A page that fails to load (site down, certificate error, blocked by another extension) is shown as "didn't load" with the browser's error code, not as restricted.
 
 When the extension detects a restricted page, it shows:
 - A clear message explaining why the page cannot be scanned
@@ -231,12 +273,13 @@ External scanners work because they make requests from their own servers, outsid
 
 ## Privacy
 
-All analysis runs locally in your browser. No data is sent to the extension author or any third party. The extension reads HTTP response headers from pages you visit, and when those are incomplete it re-requests the page once from the same website, without cookies (never for Incognito tabs). It does not modify any page content or inject scripts.
+All analysis runs locally in your browser. No data is sent to the extension author or any third party. The extension reads HTTP response headers from pages you visit. When you open the popup without data for a page, or press rescan, it requests the page once from the same website, without cookies. In the background it only does that for pages loaded from the browser cache that it hasn't seen from the network in this session (because the cache drops some headers), which you can turn off in the settings. It never re-requests Incognito tabs. It does not modify any page content or inject scripts.
 
 ## Changelog
 
 | Version | Change |
 |---------|--------|
+| **1.6.7** | Security fixes: stop capturing headers and cookies of every subresource request; fix CSP grading bypass via repeated or uppercase directives; external scan links no longer send the query string or fragment; no background re-requests for Incognito tabs; background fetches time out and ignore caller-supplied URLs; stricter extension CSP; hash and SPA route changes no longer trigger repeated background requests; fix service worker error on a 304 after a failed scan; fix privacy policy contact link; the Chrome Web Store is recognized without a request (no more CORS error); HSTS with `max-age=0` or no valid `max-age` no longer counts toward the grade; cookie values hidden when copying raw headers; values of cookies without a name are no longer shown unblurred |
 | **1.6.6** | Minor refactor on the wording across user-facing strings and documentation |
 | **1.6.5** | Security fix: escape response header values before rendering in the popup to prevent HTML injection from malicious sites |
 | **1.6.4** | Welcome page on first install with quick-start guide and Incognito tip; version tag in popup header; NEL and Report-To header analysis; fixed stale headers persisting across navigations |

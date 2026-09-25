@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Headers Inspector Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="container">
+    <header class="page-header">
+      <img src="icons/icon48.png" alt="" class="logo" width="40" height="40">
+      <div>
+        <h1>Settings</h1>
+        <p class="subtitle">Security Headers Inspector <span id="version"></span></p>
+      </div>
+    </header>
+
+    <form id="settings-form">
+      <fieldset>
+        <legend>Privacy</legend>
+
+        <div class="setting">
+          <input type="checkbox" id="autoFetch" aria-describedby="autoFetch-desc">
+          <div>
+            <label for="autoFetch">Re-check incomplete pages in the background</label>
+            <p id="autoFetch-desc" class="desc">Browsers don't keep the Strict-Transport-Security and Set-Cookie headers in their cache, so a page loaded from cache looks like it's missing them. When on, the extension requests such a page once more from the site (without cookies) to get the full set, unless it already saw the same page load from the network in this session. It also scans the tabs that are open when you install the extension. When off, the toolbar grade can be wrong for cached pages, but the popup still re-checks when you open it. Never used for Incognito tabs.</p>
+          </div>
+        </div>
+
+        <div class="setting">
+          <input type="checkbox" id="blurCookies" aria-describedby="blurCookies-desc">
+          <div>
+            <label for="blurCookies">Blur cookie values in the popup</label>
+            <p id="blurCookies-desc" class="desc">Cookie values often contain session tokens. When on, they are blurred until you click them. Copied headers always hide cookie values.</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Display</legend>
+
+        <div class="setting">
+          <input type="checkbox" id="showBadge" aria-describedby="showBadge-desc">
+          <div>
+            <label for="showBadge">Show the grade on the toolbar icon</label>
+            <p id="showBadge-desc" class="desc">Displays the letter grade of the current page as a badge on the extension icon.</p>
+          </div>
+        </div>
+      </fieldset>
+    </form>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+  <script src="analysis.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

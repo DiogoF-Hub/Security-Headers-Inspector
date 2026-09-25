@@ -10,34 +10,47 @@
   <div id="app">
     <!-- Compact header -->
     <div id="header">
-      <div id="grade-badge">-</div>
+      <div id="grade-badge" role="img" aria-label="Grade not available yet">-</div>
       <div id="site-info">
         <div id="site-url">Loading...</div>
-        <div id="site-summary"></div>
+        <div id="site-summary" role="status" aria-live="polite"></div>
       </div>
       <span id="version-tag" title="Extension version"></span>
-      <button id="theme-btn" title="Toggle light/dark theme">&#9788;</button>
-      <button id="rescan-btn" title="Re-scan headers">&#8635;</button>
+      <button id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
+      <button id="theme-btn" title="Toggle light/dark theme" aria-label="Toggle light or dark theme">&#9788;</button>
+      <button id="rescan-btn" title="Re-scan headers" aria-label="Re-scan headers">&#8635;</button>
     </div>
 
     <!-- Quick status row -->
-    <div id="quick-status"></div>
+    <div id="quick-status" aria-label="Scored security headers"></div>
 
     <!-- External scan links -->
     <div id="external-scans">
       <button id="scan-secheaders" title="Scan on securityheaders.com">
-        <span class="scan-icon">&#9881;</span> SecurityHeaders.com
+        <span class="scan-icon" aria-hidden="true">&#9881;</span> SecurityHeaders.com
       </button>
       <button id="scan-ssllabs" title="Scan on SSL Labs">
-        <span class="scan-icon">&#128274;</span> SSL Labs
+        <span class="scan-icon" aria-hidden="true">&#128274;</span> SSL Labs
       </button>
     </div>
 
     <!-- Expand toggle -->
-    <button id="toggle-details">Show Details <span class="arrow">&#9660;</span></button>
+    <button id="toggle-details" aria-expanded="false" aria-controls="details">Show Details <span class="arrow" aria-hidden="true">&#9660;</span></button>
 
     <!-- Expandable details -->
     <div id="details">
+      <!-- Score breakdown -->
+      <div class="section">
+        <h3 class="raw-toggle" id="breakdown-toggle" aria-controls="breakdown">Score Breakdown <span class="arrow" aria-hidden="true">&#9660;</span></h3>
+        <div id="breakdown"></div>
+      </div>
+
+      <!-- Redirect chain -->
+      <div class="section" id="redirect-section" style="display:none;">
+        <h3>Redirects</h3>
+        <div id="redirect-list"></div>
+      </div>
+
       <!-- Security headers section -->
       <div class="section">
         <h3>Security Headers</h3>
@@ -71,7 +84,7 @@
       <!-- Raw headers section -->
       <div class="section">
         <div class="raw-header-row">
-          <h3 class="raw-toggle" id="raw-toggle">Raw Headers <span class="arrow">&#9660;</span></h3>
+          <h3 class="raw-toggle" id="raw-toggle" aria-controls="raw-headers">Raw Headers <span class="arrow" aria-hidden="true">&#9660;</span></h3>
           <button id="copy-raw-btn" title="Copy raw headers to clipboard (cookie values hidden)">Copy</button>
         </div>
         <div id="raw-headers"></div>
@@ -80,13 +93,13 @@
 
     <!-- No data state -->
     <div id="no-data" class="hidden">
-      <p>No headers available for this page.</p>
-      <p class="hint">Try navigating to a regular website.</p>
+      <p id="no-data-title">No headers available for this page.</p>
+      <p class="hint" id="no-data-hint">Try navigating to a regular website.</p>
     </div>
 
     <!-- Internal page state -->
     <div id="internal-page" class="hidden">
-      <div id="internal-icon">&#128274;</div>
+      <div id="internal-icon" aria-hidden="true">&#128274;</div>
       <p class="internal-title">Internal Page</p>
       <p id="internal-scheme"></p>
       <p class="hint">Not a website. Security headers don't apply here.</p>
@@ -94,11 +107,11 @@
 
     <!-- Restricted page state -->
     <div id="restricted-page" class="hidden">
-      <div id="restricted-icon">&#128683;</div>
+      <div id="restricted-icon" aria-hidden="true">&#128683;</div>
       <p class="restricted-title">Restricted Page</p>
       <p id="restricted-url"></p>
       <p class="restricted-summary">This page cannot be scanned by browser extensions.</p>
-      <button id="restricted-why-toggle">Why? <span class="arrow">&#9660;</span></button>
+      <button id="restricted-why-toggle" aria-expanded="false" aria-controls="restricted-why">Why? <span class="arrow" aria-hidden="true">&#9660;</span></button>
       <div id="restricted-why" class="restricted-why-content">
         <p>Chromium has a hardcoded list of protected domains built into its source code, such as the Chrome Web Store. This applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.). Administrators can also protect extra sites through browser policy. This is a browser-level security boundary, not a server-side decision.</p>
         <p>On these pages the <strong>webRequest API</strong> (which captures headers during navigation) doesn't report anything to extensions, and extensions aren't allowed to read the response of their own <strong>fetch requests</strong>.</p>
@@ -115,6 +128,7 @@
       </div>
     </div>
   </div>
+  <script src="analysis.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

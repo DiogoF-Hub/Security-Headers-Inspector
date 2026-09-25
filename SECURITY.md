@@ -42,7 +42,7 @@ To help triage and reproduce the issue quickly, please include where applicable:
 
 In scope:
 
-- The extension's source code in this repository (`background.js`, `popup.js`, `popup.html`, `popup.css`, `manifest.json`)
+- The extension's source code in this repository (`manifest.json`, `analysis.js`, `background.js`, the popup, settings and welcome pages)
 - Any code that handles or renders HTTP response headers, cookies, or other data captured from visited pages
 - Permission misuse, privilege escalation, or data exfiltration paths within the extension
 
