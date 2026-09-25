@@ -2,7 +2,7 @@
 
 A Chromium browser extension (Manifest V3) that checks the security headers of any website you visit. Inspired by [securityheaders.com](https://securityheaders.com/). Works on Chrome, Brave, Edge, Opera, and any Chromium-based browser.
 
-**Current Version:** 1.6.6
+**Current Version:** 2.0.0
 
 ## What It Does
 
@@ -296,6 +296,7 @@ All analysis runs locally in your browser. No data is sent to the extension auth
 
 | Version | Change |
 |---------|--------|
+| **2.0.0** | **Security:** only page loads and the extension's own requests are captured (no more subresource cookies and URLs); CSP bypasses via repeated or uppercase directives fixed; rescans only fetch the tab's own URL; no background requests for Incognito tabs; scan links drop query strings and credentials; cookie values hidden when copying; stricter extension CSP. **Grading:** only header values browsers apply earn points (HSTS `max-age=0` or over plain HTTP, invalid X-Frame-Options/X-Content-Type-Options/Referrer-Policy, Permissions-Policy syntax errors, `frame-ancestors *`); deeper CSP and cookie checks. **New:** settings page, score breakdown, redirect chain, HSTS preload check, keyboard and screen reader support. **Reliability:** pages served from the browser cache keep their HSTS and cookies; failed rescans keep the last result; sites that are down show the browser's error instead of "Restricted"; downloads and 204 responses no longer replace the page's result; the Chrome Web Store is recognized without a request. **Development:** shared `analysis.js`, unit and browser tests with CI |
 | **1.6.7** | Security fixes: stop capturing headers and cookies of every subresource request; fix CSP grading bypass via repeated or uppercase directives; external scan links no longer send the query string or fragment; no background re-requests for Incognito tabs; background fetches time out and ignore caller-supplied URLs; stricter extension CSP; hash and SPA route changes no longer trigger repeated background requests; fix service worker error on a 304 after a failed scan; fix privacy policy contact link; the Chrome Web Store is recognized without a request (no more CORS error); HSTS with `max-age=0` or no valid `max-age` no longer counts toward the grade; cookie values hidden when copying raw headers; values of cookies without a name are no longer shown unblurred |
 | **1.6.6** | Minor refactor on the wording across user-facing strings and documentation |
 | **1.6.5** | Security fix: escape response header values before rendering in the popup to prevent HTML injection from malicious sites |
