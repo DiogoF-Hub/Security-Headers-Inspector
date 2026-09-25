@@ -128,8 +128,17 @@ async function launch() {
 
   async function close() {
     await browser.close().catch(() => {});
-    proc.kill("SIGKILL");
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    if (proc.exitCode === null && proc.signalCode === null) {
+      const exited = new Promise(resolve => proc.once("exit", resolve));
+      proc.kill("SIGKILL");
+      await exited;
+    }
+    // Chromium's helper processes can still be writing to the profile for a moment
+    try {
+      fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (err) {
+      console.warn(`Could not remove ${userDataDir}: ${err.message}`);
+    }
   }
 
   return { ctx, sw, id, port, openPopup, extensionsPage, close };
