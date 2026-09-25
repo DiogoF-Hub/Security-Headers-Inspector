@@ -72,7 +72,7 @@
       <div class="section">
         <div class="raw-header-row">
           <h3 class="raw-toggle" id="raw-toggle">Raw Headers <span class="arrow">&#9660;</span></h3>
-          <button id="copy-raw-btn" title="Copy raw headers to clipboard">Copy</button>
+          <button id="copy-raw-btn" title="Copy raw headers to clipboard (cookie values hidden)">Copy</button>
         </div>
         <div id="raw-headers"></div>
       </div>
@@ -100,9 +100,9 @@
       <p class="restricted-summary">This page cannot be scanned by browser extensions.</p>
       <button id="restricted-why-toggle">Why? <span class="arrow">&#9660;</span></button>
       <div id="restricted-why" class="restricted-why-content">
-        <p>Chromium has a hardcoded list of protected domains built into its source code. This applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.). Extensions are blocked before any request is even made. This is a browser-level security boundary, not a server-side decision.</p>
-        <p>Both the <strong>webRequest API</strong> (which captures headers during navigation) and <strong>fetch requests</strong> from extensions are rejected by Chrome on these domains.</p>
-        <p>This is a browser-level restriction. No extension can bypass it.</p>
+        <p>Chromium has a hardcoded list of protected domains built into its source code, such as the Chrome Web Store. This applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.). Administrators can also protect extra sites through browser policy. This is a browser-level security boundary, not a server-side decision.</p>
+        <p>On these pages the <strong>webRequest API</strong> (which captures headers during navigation) doesn't report anything to extensions, and extensions aren't allowed to read the response of their own <strong>fetch requests</strong>.</p>
+        <p>No extension can bypass this.</p>
         <p>External scanners like SecurityHeaders.com work because they make the request from their own servers, outside of the browser sandbox.</p>
       </div>
       <div id="restricted-scans">

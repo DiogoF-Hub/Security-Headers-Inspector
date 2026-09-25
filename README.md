@@ -22,7 +22,7 @@ Every website you visit automatically gets a **letter grade** (A+ through F) dis
 - **Information disclosure detection** flagging headers that leak server versions, frameworks, or debug info
 - **Deprecated header detection** identifying headers that are no longer useful (Expect-CT, HPKP, etc.)
 - **Color-coded raw headers** with security headers in green, info disclosure in amber, deprecated in purple, and good security tokens highlighted in bold
-- **Copy to clipboard** for one-click copy of all raw headers
+- **Copy to clipboard** for one-click copy of all raw headers (cookie values are hidden)
 - **External scan shortcuts** with buttons and right-click menu to scan on SecurityHeaders.com and SSL Labs
 - **Internal page detection** showing a friendly message on `chrome://`, `about:`, extension pages, etc.
 - **Restricted page detection** that automatically detects pages Chromium blocks extensions from inspecting, with a "Why?" explainer and external scan buttons
@@ -214,7 +214,9 @@ Works on any Chromium-based browser that supports Manifest V3:
 
 Some pages cannot be scanned by any browser extension. Chromium has a hardcoded list of protected domains built into its source code, and this applies to all Chromium-based browsers (Chrome, Brave, Edge, Opera, Vivaldi, etc.).
 
-On these pages, both the `webRequest` API (which captures headers during navigation) and `fetch` requests from extensions are blocked at the browser level before any network request is made. This is not caused by any HTTP header or server configuration. It's a security boundary enforced by the browser itself.
+On these pages, the `webRequest` API (which captures headers during navigation) doesn't report anything to extensions, and extensions aren't allowed to read the response of their own `fetch` requests. This is not caused by any HTTP header or server configuration. It's a security boundary enforced by the browser itself. Administrators can also protect extra sites through browser policy.
+
+The extension recognizes the Chrome Web Store without making any request. Any other protected page (for example one blocked by browser policy) is detected when its request fails.
 
 When the extension detects a restricted page, it shows:
 - A clear message explaining why the page cannot be scanned
@@ -229,7 +231,7 @@ External scanners work because they make requests from their own servers, outsid
 
 ## Privacy
 
-All analysis runs locally in your browser. No data is sent to any server. The extension only reads HTTP response headers from pages you visit. It does not modify any page content or inject scripts.
+All analysis runs locally in your browser. No data is sent to the extension author or any third party. The extension reads HTTP response headers from pages you visit, and when those are incomplete it re-requests the page once from the same website, without cookies (never for Incognito tabs). It does not modify any page content or inject scripts.
 
 ## Changelog
 

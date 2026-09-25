@@ -6,6 +6,8 @@
 
 - Reads HTTP response headers from websites you visit to evaluate their security configuration
 - Stores header data temporarily in your browser's session storage (cleared when the browser closes)
+- When the headers captured during page load are incomplete, re-requests the page you are viewing directly from that website, without cookies, to read its headers. This is never done for Incognito tabs
+- Only records the headers of top-level pages you open and of its own re-requests; images, scripts, and other resources loaded by pages are ignored
 - Saves your light/dark theme preference in local storage
 
 ## What the extension does NOT do
@@ -26,7 +28,7 @@ All data remains entirely on your device:
 
 ## External links
 
-The extension provides optional buttons to scan a site on [SecurityHeaders.com](https://securityheaders.com/) and [SSL Labs](https://www.ssllabs.com/ssltest/). These open in a new tab and are initiated only by the user clicking the button. No data is sent automatically.
+The extension provides optional buttons to scan a site on [SecurityHeaders.com](https://securityheaders.com/) and [SSL Labs](https://www.ssllabs.com/ssltest/). These open in a new tab and are initiated only by the user clicking the button. Only the page's address without its query string or fragment is passed to these services (and only the hostname to SSL Labs). No data is sent automatically.
 
 ## Permissions
 
@@ -41,10 +43,10 @@ The extension provides optional buttons to scan a site on [SecurityHeaders.com](
 
 ## Contact
 
-If you have questions about this privacy policy, please open an issue on the [GitHub repository](https://github.com/diogo/Security-Headers-Inspector).
+If you have questions about this privacy policy, please open an issue on the [GitHub repository](https://github.com/DiogoF-Hub/Security-Headers-Inspector).
 
 ## Changes
 
 This privacy policy may be updated to reflect changes in the extension. Any updates will be posted to this file in the repository.
 
-*Last updated: April 13, 2026*
+*Last updated: September 24, 2026*

@@ -8,12 +8,7 @@ const SECURITY_HEADERS = {
     evaluate: (val) => {
       if (!val) return { status: "bad", msg: "Missing. Your site has no Content Security Policy, leaving it vulnerable to XSS and data injection attacks." };
 
-      // Parse directives. Object.create(null) prevents a directive named __proto__ from mutating the prototype.
-      const directives = Object.create(null);
-      val.split(";").forEach((d) => {
-        const parts = d.trim().split(/\s+/);
-        if (parts.length > 0) directives[parts[0]] = parts.slice(1);
-      });
+      const directives = parseCSP(val);
 
       const warnings = [];
       const scriptSrc = directives["script-src"] || directives["default-src"] || [];
@@ -104,8 +99,11 @@ const SECURITY_HEADERS = {
     recommendation: "Set <code>max-age</code> to at least 31536000 (1 year). Add <code>includeSubDomains</code> to protect all subdomains. Add <code>preload</code> and submit your site to the HSTS preload list for protection on the very first visit.",
     evaluate: (val) => {
       if (!val) return { status: "bad", msg: "Missing. Connections can be downgraded to unencrypted HTTP, exposing data to interception." };
-      const maxAgeMatch = val.match(/max-age=(\d+)/);
-      const maxAge = maxAgeMatch ? parseInt(maxAgeMatch[1]) : 0;
+      const maxAge = hstsMaxAge(val);
+      if (maxAge === null)
+        return { status: "bad", msg: "No valid max-age directive. Browsers ignore this header, so HTTPS is not enforced." };
+      if (maxAge === 0)
+        return { status: "bad", msg: "max-age=0 tells browsers to forget this site's HSTS policy, so HTTPS is not enforced. This is only useful when intentionally switching HSTS off." };
       const hasSub = val.toLowerCase().includes("includesubdomains");
       const hasPreload = val.toLowerCase().includes("preload");
       if (maxAge >= 31536000 && hasSub && hasPreload)
@@ -138,7 +136,7 @@ const SECURITY_HEADERS = {
       if (!val) {
         // Check if CSP frame-ancestors covers this
         const csp = (allHeaders && allHeaders["content-security-policy"]) || "";
-        if (/frame-ancestors\s/.test(csp)) {
+        if ("frame-ancestors" in parseCSP(csp)) {
           return { status: "good", msg: "Not set, but CSP frame-ancestors is configured. This is the modern replacement and takes precedence." };
         }
         return { status: "bad", msg: "Missing. Your site can be embedded in iframes by any page, making it vulnerable to clickjacking." };
@@ -345,12 +343,23 @@ const DEPRECATED_HEADERS = {
   }
 };
 
+// Split a Set-Cookie string into "name=", value, and "; attributes". Only the
+// part before the first ';' holds name and value. A pair without '=' is a
+// nameless cookie whose whole pair is the value, so it must not be shown as the name.
+function splitCookie(cookieStr) {
+  const semiIdx = cookieStr.indexOf(";");
+  const pair = semiIdx === -1 ? cookieStr : cookieStr.substring(0, semiIdx);
+  const attrsPart = semiIdx === -1 ? "" : cookieStr.substring(semiIdx);
+  const eqIdx = pair.indexOf("=");
+  if (eqIdx === -1) return { namePart: "", valuePart: pair, attrsPart };
+  return { namePart: pair.substring(0, eqIdx + 1), valuePart: pair.substring(eqIdx + 1), attrsPart };
+}
+
 // Cookie security analysis
 function analyzeCookie(cookieStr) {
   const lower = cookieStr.toLowerCase();
 
-  // Extract cookie name (everything before the first '=')
-  const name = cookieStr.split("=")[0].trim();
+  const name = splitCookie(cookieStr).namePart.slice(0, -1).trim();
 
   const hasSecure = /;\s*secure/i.test(lower);
   const hasHttpOnly = /;\s*httponly/i.test(lower);
@@ -402,16 +411,46 @@ const HEADER_WEIGHTS = {
 };
 const MAX_SCORE = 120;
 
+// Parse a CSP header into { directive: [sources] } the way browsers read it:
+// directive names and keywords are case-insensitive, and when a directive is
+// repeated only the first occurrence counts. Without this, a policy like
+// "script-src 'unsafe-inline'; script-src 'self'" would be graded as safe.
+// Object.create(null) prevents a CSP directive named __proto__ from mutating the prototype.
+// IMPORTANT: keep in sync with the identical function in background.js
+function parseCSP(csp) {
+  const directives = Object.create(null);
+  for (const d of csp.toLowerCase().split(";")) {
+    const parts = d.trim().split(/\s+/);
+    if (!parts[0] || parts[0] in directives) continue;
+    directives[parts[0]] = parts.slice(1);
+  }
+  return directives;
+}
+
+// HSTS max-age in seconds, or null when there is no valid max-age.
+// Directive names are case-insensitive and the value may be quoted (RFC 6797).
+// IMPORTANT: keep in sync with the identical function in background.js
+function hstsMaxAge(val) {
+  if (!val) return null;
+  const m = val.match(/max-age\s*=\s*"?(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Whether a scored header actually protects the page. HSTS with max-age=0 tells
+// browsers to delete the policy, and one without max-age is ignored, so neither
+// counts. CSP frame-ancestors stands in for a missing X-Frame-Options.
+// IMPORTANT: keep in sync with the identical function in background.js
+function countsAsPresent(h, headers) {
+  if (h === "strict-transport-security") return hstsMaxAge(headers[h]) > 0;
+  if (h === "x-frame-options" && !headers[h]) return "frame-ancestors" in parseCSP(headers["content-security-policy"] || "");
+  return !!headers[h];
+}
+
 // CSP quality penalty: caps score if script-src has unsafe-inline/unsafe-eval
 // IMPORTANT: keep in sync with the identical function in background.js
 function applyCSPPenalty(csp, score) {
   if (!csp) return score;
-  // Object.create(null) prevents a CSP directive named __proto__ from mutating the prototype.
-  const directives = Object.create(null);
-  csp.split(";").forEach((d) => {
-    const parts = d.trim().split(/\s+/);
-    if (parts.length > 0) directives[parts[0]] = parts.slice(1);
-  });
+  const directives = parseCSP(csp);
   const scriptSrc = directives["script-src"] || directives["default-src"] || [];
   const hasStrictDynamic = scriptSrc.includes("'strict-dynamic'");
   const hasNonce = scriptSrc.some(s => s.startsWith("'nonce-"));
@@ -429,14 +468,12 @@ function applyCSPPenalty(csp, score) {
 function computeGrade(headers) {
   const securityKeys = Object.keys(SECURITY_HEADERS);
   const csp = headers["content-security-policy"] || "";
-  const hasFrameAncestors = /frame-ancestors\s/.test(csp);
 
   let score = 0;
   let present = 0;
 
   for (const h of securityKeys) {
-    const isPresent = headers[h] || (h === "x-frame-options" && hasFrameAncestors);
-    if (isPresent) {
+    if (countsAsPresent(h, headers)) {
       score += HEADER_WEIGHTS[h] || 0;
       present++;
     }
@@ -467,17 +504,19 @@ function computeGrade(headers) {
 }
 
 // Ask the background page to fetch headers. The background's fetch triggers
-// webRequest which can see ALL headers including HSTS
-function fetchHeadersViaBackground(url, tabId) {
+// webRequest which can see ALL headers including HSTS. The background looks up
+// the tab's URL itself, so only the tab id is sent.
+function fetchHeadersViaBackground(tabId) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "fetchHeaders", url: url, tabId: tabId }, (response) => {
+    chrome.runtime.sendMessage({ type: "fetchHeaders", tabId: tabId }, (response) => {
       resolve(response);
     });
   });
 }
 
-// Store current headers for copy button
+// Store current headers and cookies for copy button
 let currentHeaders = null;
+let currentCookies = [];
 
 // Build the UI
 function render(data) {
@@ -521,6 +560,7 @@ function render(data) {
   if (resolvedCookies.length === 0 && headers["set-cookie"]) {
     resolvedCookies = [headers["set-cookie"]];
   }
+  currentCookies = resolvedCookies;
 
   // Grade badge
   const badge = document.getElementById("grade-badge");
@@ -537,14 +577,10 @@ function render(data) {
   document.getElementById("site-summary").textContent =
     `${grade.present}/${grade.total} security headers present. Score: ${Math.round(grade.pct)}%`;
 
-  // Check if CSP frame-ancestors covers X-Frame-Options
-  const csp = headers["content-security-policy"] || "";
-  const hasFrameAncestors = /frame-ancestors\s/.test(csp);
-
   // Quick status pills
   quickStatus.innerHTML = "";
   for (const [key, def] of Object.entries(SECURITY_HEADERS)) {
-    const isPresent = headers[key] || (key === "x-frame-options" && hasFrameAncestors);
+    const isPresent = countsAsPresent(key, headers);
     const pill = document.createElement("span");
     pill.className = `status-pill ${isPresent ? "present" : "missing"}`;
     pill.textContent = def.label;
@@ -589,13 +625,11 @@ function render(data) {
 
       const statusIcon = allGood ? '<span class="status-icon good">✔</span>' : '<span class="status-icon warn">⚠</span>';
 
-      // Extract cookie value (everything after name=)
-      const eqIdx = cookieStr.indexOf("=");
-      const cookieValue = eqIdx !== -1 ? cookieStr.substring(eqIdx + 1).split(";")[0].trim() : "";
+      const cookieValue = splitCookie(cookieStr).valuePart.trim();
 
       item.innerHTML = `
         <div class="cookie-header-row">
-          <span class="cookie-name"><span class="expand-chevron">▸</span> ${escapeHtml(analysis.name)}</span>
+          <span class="cookie-name"><span class="expand-chevron">▸</span> ${escapeHtml(analysis.name || "(no name)")}</span>
           ${statusIcon}
         </div>
         <div class="cookie-flags">${flagsHtml}${missingHtml}${missingHttp}${missingSame}${missingPrefix}</div>
@@ -736,23 +770,7 @@ function render(data) {
       row.className = `raw-row ${cookieOk ? "raw-cookie-good" : "raw-cookie-warn"}`;
 
       // Split cookie into name=value and ;flags so we only blur the value
-      const eqIdx = cookieStr.indexOf("=");
-      const semiIdx = cookieStr.indexOf(";");
-      let namePart, valuePart, flagsPart;
-      if (eqIdx !== -1) {
-        namePart = cookieStr.substring(0, eqIdx + 1); // "name="
-        if (semiIdx !== -1 && semiIdx > eqIdx) {
-          valuePart = cookieStr.substring(eqIdx + 1, semiIdx);
-          flagsPart = cookieStr.substring(semiIdx); // "; Secure; HttpOnly; ..."
-        } else {
-          valuePart = cookieStr.substring(eqIdx + 1);
-          flagsPart = "";
-        }
-      } else {
-        namePart = cookieStr;
-        valuePart = "";
-        flagsPart = "";
-      }
+      const { namePart, valuePart, attrsPart: flagsPart } = splitCookie(cookieStr);
 
       const flagsHtml = flagsPart ? highlightGoodTokens("set-cookie", flagsPart) : "";
       row.innerHTML = `<span class="raw-key">set-cookie</span><span class="raw-val">${escapeHtml(namePart)}<span class="raw-cookie-value blurred">${escapeHtml(valuePart)}</span>${flagsHtml}</span>`;
@@ -911,8 +929,15 @@ document.getElementById("raw-toggle").addEventListener("click", function () {
 document.getElementById("copy-raw-btn").addEventListener("click", function () {
   if (!currentHeaders) return;
   const btn = this;
-  const sortedKeys = Object.keys(currentHeaders).sort();
-  const text = sortedKeys.map(k => `${k}: ${currentHeaders[k]}`).join("\n");
+  // Cookie values are blurred in the UI, so keep them out of the clipboard too:
+  // copied headers often end up pasted into bug reports and chats.
+  const sortedKeys = Object.keys(currentHeaders).filter(k => k !== "set-cookie").sort();
+  const lines = sortedKeys.map(k => `${k}: ${currentHeaders[k]}`);
+  for (const cookieStr of currentCookies) {
+    const { namePart, attrsPart } = splitCookie(cookieStr);
+    lines.push(`set-cookie: ${namePart}[hidden]${attrsPart}`);
+  }
+  const text = lines.join("\n");
   navigator.clipboard.writeText(text).then(() => {
     btn.textContent = "Copied!";
     btn.classList.add("copied");
@@ -923,27 +948,45 @@ document.getElementById("copy-raw-btn").addEventListener("click", function () {
   });
 });
 
-// External scan buttons: get full URL and hostname from the active tab
-function getActiveTabInfo(callback) {
+// URL handed to external scanners. Drops credentials, query string and fragment,
+// which can carry tokens (reset links, OAuth codes) that shouldn't leave the browser.
+// IMPORTANT: keep in sync with the identical function in background.js
+function scanTargetUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.origin + u.pathname;
+  } catch {
+    return null;
+  }
+}
+
+function openSecurityHeadersScan(url) {
+  const target = scanTargetUrl(url);
+  if (!target) return;
+  chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(target)}&hide=on&followRedirects=on`, active: false });
+}
+
+function openSslLabsScan(url) {
+  const target = scanTargetUrl(url);
+  if (!target) return;
+  const hostname = new URL(target).hostname;
+  chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest`, active: false });
+}
+
+// External scan buttons: use the active tab's URL
+function getActiveTabUrl(callback) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (!tabs[0] || !tabs[0].url) return;
-    const url = tabs[0].url;
-    let hostname;
-    try { hostname = new URL(url).hostname; } catch { return; }
-    callback(url, hostname);
+    if (tabs[0] && tabs[0].url) callback(tabs[0].url);
   });
 }
 
 document.getElementById("scan-secheaders").addEventListener("click", () => {
-  getActiveTabInfo((url) => {
-    chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(url)}&hide=on&followRedirects=on`, active: false });
-  });
+  getActiveTabUrl(openSecurityHeadersScan);
 });
 
 document.getElementById("scan-ssllabs").addEventListener("click", () => {
-  getActiveTabInfo((_url, hostname) => {
-    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest`, active: false });
-  });
+  getActiveTabUrl(openSslLabsScan);
 });
 
 // Restricted page: "Why?" toggle
@@ -957,16 +1000,12 @@ document.getElementById("restricted-why-toggle").addEventListener("click", () =>
 // Restricted page: scan buttons
 document.getElementById("restricted-scan-secheaders").addEventListener("click", () => {
   const url = document.getElementById("restricted-page").dataset.url;
-  if (url) chrome.tabs.create({ url: `https://securityheaders.com/?q=${encodeURIComponent(url)}&hide=on&followRedirects=on`, active: false });
+  if (url) openSecurityHeadersScan(url);
 });
 
 document.getElementById("restricted-scan-ssllabs").addEventListener("click", () => {
   const url = document.getElementById("restricted-page").dataset.url;
-  if (url) {
-    let hostname;
-    try { hostname = new URL(url).hostname; } catch { return; }
-    chrome.tabs.create({ url: `https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(hostname)}&hideResults=on&latest`, active: false });
-  }
+  if (url) openSslLabsScan(url);
 });
 
 function renderInternalPage(url) {
@@ -1036,7 +1075,7 @@ function scanActiveTab(forceRefresh = false) {
 
     if (forceRefresh) {
       // Skip cache, always do a fresh fetch via background
-      const data = await fetchHeadersViaBackground(url, tab.id);
+      const data = await fetchHeadersViaBackground(tab.id);
       if (data && data.restricted) {
         renderRestrictedPage(url);
       } else {
@@ -1050,7 +1089,7 @@ function scanActiveTab(forceRefresh = false) {
         } else if (response && response.headers && Object.keys(response.headers).length > 0) {
           render(response);
         } else {
-          const data = await fetchHeadersViaBackground(url, tab.id);
+          const data = await fetchHeadersViaBackground(tab.id);
           if (data && data.restricted) {
             renderRestrictedPage(url);
           } else {
